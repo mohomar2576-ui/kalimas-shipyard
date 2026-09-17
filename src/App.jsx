@@ -8,6 +8,7 @@ import {
   UserPlus, RefreshCw, Lock, ArrowLeft, History, Truck, Calendar, BarChart2,
   Eye, EyeOff, Share2, Copy, Check, Filter, TrendingUp
 } from 'lucide-react';
+import { Analytics } from '@vercel/analytics/react';
 
 // Import the functions you need from the SDKs you need
 import { getAnalytics } from "firebase/analytics";
@@ -2500,6 +2501,7 @@ export default function App() {
   return (
     <AuthProvider>
       <MainApp />
+      <Analytics />
     </AuthProvider>
   );
 }
