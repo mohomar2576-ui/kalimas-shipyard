@@ -105,7 +105,14 @@ const getMakassarTimeString = (timestamp = Date.now()) => {
 const getLocalData = (key, fallback) => {
   try {
     const item = localStorage.getItem(`kalimas_${key}`);
-    return item ? JSON.parse(item) : fallback;
+    if (item) return JSON.parse(item);
+    
+    // Fallback checks for legacy keys to preserve data
+    if (key === 'tandon_tx' || key === 'gallon_tx' || key === 'tangki_tx' || key === 'kapal_tx') {
+      const legacy = localStorage.getItem(`kalimas_${key}`);
+      if (legacy) return JSON.parse(legacy);
+    }
+    return fallback;
   } catch (e) {
     return fallback;
   }
@@ -345,7 +352,10 @@ const TandonOperator = ({ user, onNavigateHome }) => {
   const isReadOnly = user.role === 'MANAGEMENT';
   const [activeTab, setActiveTab] = useState('INPUT'); 
   const [drivers, setDrivers] = useState(() => getLocalData('tandon_drivers', [{ id: 'drv_1', name: 'PAK RUDI' }, { id: 'drv_2', name: 'PAK JOKO' }]));
-  const [allTx, setAllTx] = useState(() => getLocalData('tandon_tx', []));
+  const [allTx, setAllTx] = useState(() => [
+    ...getLocalData('tandon_tx', []),
+    ...getLocalData('transactions', []).filter(t => t.divisionType === 'TANDON')
+  ]);
   const [search, setSearch] = useState('');
   const [tandonPrice, setTandonPrice] = useState(20000);
   const [shiftViewDate, setShiftViewDate] = useState('TODAY');
@@ -369,7 +379,7 @@ const TandonOperator = ({ user, onNavigateHome }) => {
       }, () => {});
       unsubTx = onSnapshot(getPublicPath('transactions'), snap => {
         const list = snap.docs.map(d => ({ ...d.data(), id: d.id }));
-        if (list.length > 0) { setAllTx(list); setLocalData('tandon_tx', list); }
+        if (list.length > 0) { setAllTx(list); setLocalData('tandon_tx', list); setLocalData('transactions', list); }
       }, () => {});
     } catch (e) {}
     return () => {
@@ -405,6 +415,7 @@ const TandonOperator = ({ user, onNavigateHome }) => {
     const updated = [...allTx, newTx];
     setAllTx(updated);
     setLocalData('tandon_tx', updated);
+    setLocalData('transactions', updated);
     setLastTxId(docId);
     setUndoTimer(6);
     try { await setDoc(getDocPath('transactions', docId), newTx); } catch (err) {}
@@ -415,6 +426,7 @@ const TandonOperator = ({ user, onNavigateHome }) => {
     const updated = allTx.map(t => t.id === lastTxId ? { ...t, status: 'VOIDED', voidedBy: user.name } : t);
     setAllTx(updated);
     setLocalData('tandon_tx', updated);
+    setLocalData('transactions', updated);
     setLastTxId(null);
     setUndoTimer(0);
     try { await updateDoc(getDocPath('transactions', lastTxId), { status: 'VOIDED', voidedBy: user.name }); } catch (err) {}
@@ -544,7 +556,10 @@ const GallonOperator = ({ user, onNavigateHome }) => {
   const isReadOnly = user.role === 'MANAGEMENT';
   const [activeTab, setActiveTab] = useState('INPUT'); 
   const [customers, setCustomers] = useState(() => getLocalData('gallon_customers', [{ id: 'gc_1', name: 'TOKO BERKAH', customerType: 'Reseller', price: 6000 }]));
-  const [allTx, setAllTx] = useState(() => getLocalData('gallon_tx', []));
+  const [allTx, setAllTx] = useState(() => [
+    ...getLocalData('gallon_tx', []),
+    ...getLocalData('transactions', []).filter(t => t.divisionType === 'GALLON')
+  ]);
   const [search, setSearch] = useState('');
   const [globalPrice, setGlobalPrice] = useState(6000);
   const [shiftViewDate, setShiftViewDate] = useState('TODAY');
@@ -568,7 +583,7 @@ const GallonOperator = ({ user, onNavigateHome }) => {
       }, () => {});
       unsubTx = onSnapshot(getPublicPath('transactions'), snap => {
         const list = snap.docs.map(d => ({ ...d.data(), id: d.id }));
-        if (list.length > 0) { setAllTx(list); setLocalData('gallon_tx', list); }
+        if (list.length > 0) { setAllTx(list); setLocalData('gallon_tx', list); setLocalData('transactions', list); }
       }, () => {});
     } catch (e) {}
     return () => {
@@ -606,6 +621,7 @@ const GallonOperator = ({ user, onNavigateHome }) => {
     const updated = [...allTx, newTx];
     setAllTx(updated);
     setLocalData('gallon_tx', updated);
+    setLocalData('transactions', updated);
     setLastTxId(docId);
     setUndoTimer(6);
     try { await setDoc(getDocPath('transactions', docId), newTx); } catch (err) {}
@@ -616,6 +632,7 @@ const GallonOperator = ({ user, onNavigateHome }) => {
     const updated = allTx.map(t => t.id === lastTxId ? { ...t, status: 'VOIDED', voidedBy: user.name } : t);
     setAllTx(updated);
     setLocalData('gallon_tx', updated);
+    setLocalData('transactions', updated);
     setLastTxId(null);
     setUndoTimer(0);
     try { await updateDoc(getDocPath('transactions', lastTxId), { status: 'VOIDED', voidedBy: user.name }); } catch (err) {}
@@ -748,7 +765,10 @@ const TangkiOperator = ({ user, onNavigateHome }) => {
 
   const [activeTab, setActiveTab] = useState('INPUT'); 
   const [customers, setCustomers] = useState(() => getLocalData('tangki_customers', [{ id: 'tc_1', name: 'PT PELINDO TANGKI', price: 350000 }]));
-  const [allTx, setAllTx] = useState(() => getLocalData('tangki_tx', []));
+  const [allTx, setAllTx] = useState(() => [
+    ...getLocalData('tangki_tx', []),
+    ...getLocalData('transactions', []).filter(t => t.divisionType === 'MOBIL_TANGKI')
+  ]);
   const [search, setSearch] = useState('');
   const [shiftViewDate, setShiftViewDate] = useState('TODAY');
   const [tangkiPrice, setTangkiPrice] = useState(350000);
@@ -769,7 +789,7 @@ const TangkiOperator = ({ user, onNavigateHome }) => {
       }, () => {});
       unsubTx = onSnapshot(getPublicPath('transactions'), snap => {
         const list = snap.docs.map(d => ({ ...d.data(), id: d.id }));
-        if (list.length > 0) { setAllTx(list); setLocalData('tangki_tx', list); }
+        if (list.length > 0) { setAllTx(list); setLocalData('tangki_tx', list); setLocalData('transactions', list); }
       }, () => {});
     } catch (e) {}
     return () => {
@@ -799,6 +819,7 @@ const TangkiOperator = ({ user, onNavigateHome }) => {
     const updated = [...allTx, newTx];
     setAllTx(updated);
     setLocalData('tangki_tx', updated);
+    setLocalData('transactions', updated);
     try { await setDoc(getDocPath('transactions', docId), newTx); } catch (err) {}
   };
 
@@ -807,6 +828,7 @@ const TangkiOperator = ({ user, onNavigateHome }) => {
     const updated = allTx.map(t => t.id === txId ? { ...t, status: 'VOIDED', voidedBy: user.name } : t);
     setAllTx(updated);
     setLocalData('tangki_tx', updated);
+    setLocalData('transactions', updated);
     try { await updateDoc(getDocPath('transactions', txId), { status: 'VOIDED', voidedBy: user.name }); } catch (err) {}
   };
 
@@ -929,7 +951,10 @@ const AirKapalOperator = ({ user, onNavigateHome }) => {
 
   const [activeTab, setActiveTab] = useState('INPUT'); 
   const [ships, setShips] = useState(() => getLocalData('kapal_ships', [{ id: 'shp_1', shipName: 'KM. SEJAHTERA', customerName: 'PT PELAYARAN MAJU', price: 50000 }]));
-  const [allTx, setAllTx] = useState(() => getLocalData('kapal_tx', []));
+  const [allTx, setAllTx] = useState(() => [
+    ...getLocalData('kapal_tx', []),
+    ...getLocalData('transactions', []).filter(t => t.divisionType === 'AIR_KAPAL')
+  ]);
   const [search, setSearch] = useState('');
   const [shiftViewDate, setShiftViewDate] = useState('TODAY');
   const [kapalPrice, setKapalPrice] = useState(50000);
@@ -950,7 +975,7 @@ const AirKapalOperator = ({ user, onNavigateHome }) => {
       }, () => {});
       unsubTx = onSnapshot(getPublicPath('transactions'), snap => {
         const list = snap.docs.map(d => ({ ...d.data(), id: d.id }));
-        if (list.length > 0) { setAllTx(list); setLocalData('kapal_tx', list); }
+        if (list.length > 0) { setAllTx(list); setLocalData('kapal_tx', list); setLocalData('transactions', list); }
       }, () => {});
     } catch (e) {}
     return () => {
@@ -982,6 +1007,7 @@ const AirKapalOperator = ({ user, onNavigateHome }) => {
     const updated = [...allTx, newTx];
     setAllTx(updated);
     setLocalData('kapal_tx', updated);
+    setLocalData('transactions', updated);
     try { await setDoc(getDocPath('transactions', docId), newTx); } catch (err) {}
   };
 
@@ -990,6 +1016,7 @@ const AirKapalOperator = ({ user, onNavigateHome }) => {
     const updated = allTx.map(t => t.id === txId ? { ...t, status: 'VOIDED', voidedBy: user.name } : t);
     setAllTx(updated);
     setLocalData('kapal_tx', updated);
+    setLocalData('transactions', updated);
     try { await updateDoc(getDocPath('transactions', txId), { status: 'VOIDED', voidedBy: user.name }); } catch (err) {}
   };
 
@@ -1165,7 +1192,8 @@ const ReportsModule = ({ user, onNavigateHome }) => {
     ...getLocalData('tandon_tx', []),
     ...getLocalData('gallon_tx', []),
     ...getLocalData('tangki_tx', []),
-    ...getLocalData('kapal_tx', [])
+    ...getLocalData('kapal_tx', []),
+    ...getLocalData('transactions', [])
   ]);
 
   useEffect(() => {
@@ -1173,7 +1201,7 @@ const ReportsModule = ({ user, onNavigateHome }) => {
     try {
       unsub = onSnapshot(getPublicPath('transactions'), snap => {
         const list = snap.docs.map(d => ({ ...d.data(), id: d.id }));
-        if (list.length > 0) setAllTx(list);
+        if (list.length > 0) { setAllTx(list); setLocalData('transactions', list); }
       }, () => {});
     } catch (e) {}
     return () => { if (unsub) unsub(); };
@@ -1182,9 +1210,7 @@ const ReportsModule = ({ user, onNavigateHome }) => {
   const todayStr = getMakassarDateString();
   const yesterdayStr = getAdjacentDateString(todayStr, -1);
   
-  const activeDateStr = reportTab === 'TODAY' 
-    ? (todaySubMode === 'TODAY' ? todayStr : (todaySubMode === 'YESTERDAY' ? yesterdayStr : selectedDate))
-    : todayStr;
+  const activeDateStr = todaySubMode === 'TODAY' ? todayStr : (todaySubMode === 'YESTERDAY' ? yesterdayStr : selectedDate);
 
   const getActiveTransactions = () => {
     if (reportTab === 'TODAY') {
@@ -1305,7 +1331,7 @@ const ReportsModule = ({ user, onNavigateHome }) => {
 
       <div className="grid grid-cols-3 gap-1 bg-slate-200 p-1 rounded-2xl text-xs font-extrabold">
         <button onClick={() => setReportTab('TODAY')} className={`py-2.5 rounded-xl transition-all cursor-pointer ${reportTab === 'TODAY' ? 'bg-purple-600 text-white shadow-md font-black' : 'text-slate-700 hover:text-slate-900'}`}>Hari Ini</button>
-        <button onClick={() => setReportTab('WEEK')} className={`py-2.5 rounded-xl transition-all cursor-pointer ${reportTab === 'WEEK' ? 'bg-purple-600 text-white shadow-md font-black' : 'text-slate-700 hover:text-slate-900'}`}>Minggu</button>
+        <button onClick={() => setReportTab('WEEK')} className={`py-2.5 rounded-xl transition-all cursor-pointer ${reportTab === 'WEEK' ? 'bg-purple-600 text-white shadow-md font-black' : 'text-slate-700 hover:text-slate-900'}`}>Minggu Ini</button>
         <button onClick={() => setReportTab('MONTH')} className={`py-2.5 rounded-xl transition-all cursor-pointer ${reportTab === 'MONTH' ? 'bg-purple-600 text-white shadow-md font-black' : 'text-slate-700 hover:text-slate-900'}`}>Bulan Ini</button>
       </div>
 
@@ -1937,29 +1963,12 @@ const AdminPanel = ({ onNavigateHome }) => {
           const cleanUsername = (driverUsername.trim() || driverName.replace(/\s+/g, '').toLowerCase());
           const docId = 'drv_' + Date.now();
           const newD = { id: docId, name: cleanName, username: cleanUsername, password: driverPassword || '123456', createdAt: Date.now() };
-          const newPortalUser = {
-            id: 'usr_drv_' + Date.now(),
-            name: cleanName,
-            username: cleanUsername,
-            password: driverPassword || '123456',
-            role: 'DRIVER',
-            divisions: ['TANDON'],
-            isActive: true,
-            createdAt: Date.now()
-          };
           const updated = [...drivers, newD];
           setDrivers(updated);
           setLocalData('tandon_drivers', updated);
-          
-          const updatedUsers = [...allUsers, newPortalUser];
-          setAllUsers(updatedUsers);
-          setLocalData('all_users', updatedUsers);
 
           setIsAddDriverOpen(false); setDriverName(''); setDriverUsername(''); setDriverPassword('');
-          try { 
-            await setDoc(getDocPath('drivers', docId), newD); 
-            await setDoc(getDocPath('users', newPortalUser.id), newPortalUser);
-          } catch(err){}
+          try { await setDoc(getDocPath('drivers', docId), newD); } catch(err){}
         }} className="space-y-3">
           <div>
             <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Nama Lengkap Sopir</label>
@@ -2014,29 +2023,12 @@ const AdminPanel = ({ onNavigateHome }) => {
           const cleanUsername = (tangkiUsername.trim() || tangkiName.replace(/\s+/g, '').toLowerCase());
           const docId = 'tcust_' + Date.now();
           const newC = { id: docId, name: cleanName, price: Number(tangkiCustPrice), username: cleanUsername, password: tangkiPassword || '123456', createdAt: Date.now() };
-          const newPortalUser = {
-            id: 'usr_tc_' + Date.now(),
-            name: cleanName,
-            username: cleanUsername,
-            password: tangkiPassword || '123456',
-            role: 'CUSTOMER',
-            divisions: ['MOBIL_TANGKI'],
-            isActive: true,
-            createdAt: Date.now()
-          };
           const updated = [...tangkiCust, newC];
           setTangkiCust(updated);
           setLocalData('tangki_customers', updated);
 
-          const updatedUsers = [...allUsers, newPortalUser];
-          setAllUsers(updatedUsers);
-          setLocalData('all_users', updatedUsers);
-
           setIsAddTangkiOpen(false); setTangkiName(''); setTangkiUsername(''); setTangkiPassword('');
-          try { 
-            await setDoc(getDocPath('tangki_customers', docId), newC); 
-            await setDoc(getDocPath('users', newPortalUser.id), newPortalUser);
-          } catch(e){}
+          try { await setDoc(getDocPath('tangki_customers', docId), newC); } catch(e){}
         }} className="space-y-3">
           <div>
             <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Nama Pelanggan Tangki</label>
@@ -2099,29 +2091,12 @@ const AdminPanel = ({ onNavigateHome }) => {
           const cleanUsername = (gallonUsername.trim() || gallonName.replace(/\s+/g, '').toLowerCase());
           const docId = 'gcust_' + Date.now();
           const newG = { id: docId, name: cleanName, customerType: gallonType, price: Number(gallonCustPrice), username: cleanUsername, password: gallonPassword || '123456', createdAt: Date.now() };
-          const newPortalUser = {
-            id: 'usr_gc_' + Date.now(),
-            name: cleanName,
-            username: cleanUsername,
-            password: gallonPassword || '123456',
-            role: 'CUSTOMER',
-            divisions: ['GALLON'],
-            isActive: true,
-            createdAt: Date.now()
-          };
           const updated = [...gallonCust, newG];
           setGallonCust(updated);
           setLocalData('gallon_customers', updated);
 
-          const updatedUsers = [...allUsers, newPortalUser];
-          setAllUsers(updatedUsers);
-          setLocalData('all_users', updatedUsers);
-
           setIsAddGallonOpen(false); setGallonName(''); setGallonUsername(''); setGallonPassword('');
-          try { 
-            await setDoc(getDocPath('gallon_customers', docId), newG); 
-            await setDoc(getDocPath('users', newPortalUser.id), newPortalUser);
-          } catch(e){}
+          try { await setDoc(getDocPath('gallon_customers', docId), newG); } catch(e){}
         }} className="space-y-3">
           <div>
             <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Nama Pelanggan / Toko</label>
@@ -2199,29 +2174,12 @@ const AdminPanel = ({ onNavigateHome }) => {
           const cleanUsername = (shipUsername.trim() || shipName.replace(/\s+/g, '').toLowerCase());
           const docId = 'ship_' + Date.now();
           const newS = { id: docId, shipName: cleanShip, customerName: cleanAgent, price: Number(shipPrice), username: cleanUsername, password: shipPassword || '123456', createdAt: Date.now() };
-          const newPortalUser = {
-            id: 'usr_ship_' + Date.now(),
-            name: `${cleanShip} (${cleanAgent})`,
-            username: cleanUsername,
-            password: shipPassword || '123456',
-            role: 'CUSTOMER',
-            divisions: ['AIR_KAPAL'],
-            isActive: true,
-            createdAt: Date.now()
-          };
           const updated = [...ships, newS];
           setShips(updated);
           setLocalData('kapal_ships', updated);
 
-          const updatedUsers = [...allUsers, newPortalUser];
-          setAllUsers(updatedUsers);
-          setLocalData('all_users', updatedUsers);
-
           setIsAddShipOpen(false); setShipName(''); setAgentName(''); setShipUsername(''); setShipPassword('');
-          try { 
-            await setDoc(getDocPath('kapal_ships', docId), newS); 
-            await setDoc(getDocPath('users', newPortalUser.id), newPortalUser);
-          } catch(e){}
+          try { await setDoc(getDocPath('kapal_ships', docId), newS); } catch(e){}
         }} className="space-y-3">
           <div>
             <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Nama Kapal</label>
