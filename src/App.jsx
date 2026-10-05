@@ -182,7 +182,16 @@ const AuthProvider = ({ children }) => {
       if (user) {
         try {
           unsub = onSnapshot(getPublicPath('users'), (snap) => {
-            const list = snap.docs.map(d => ({ ...d.data(), id: d.id }));
+            const list = snap.docs.map(d => {
+              const data = d.data();
+              const role = data.role || 'OPERATOR';
+              const isSuperOrMgmt = ['SUPER_ADMIN', 'MANAGEMENT'].includes(role);
+              return { 
+                ...data, 
+                id: d.id,
+                divisions: isSuperOrMgmt ? ['TANDON', 'GALLON', 'MOBIL_TANGKI', 'AIR_KAPAL', 'GAS_INDUSTRI'] : (data.divisions || ['TANDON'])
+              };
+            });
             if (list.length > 0) {
               setAllUsers(list); 
               setLocalData('all_users', list);
@@ -213,7 +222,16 @@ const AuthProvider = ({ children }) => {
     const cleanUsername = username.trim().toLowerCase();
     const usersList = Array.isArray(allUsers) && allUsers.length > 0 ? allUsers : getLocalData('all_users', []);
     const user = usersList.find(u => u.username?.toLowerCase() === cleanUsername && u.password === password && u.isActive !== false);
-    if (user) { setSessionUser(user); setLocalData('session_user', user); return { success: true }; }
+    if (user) {
+      const isSuperOrMgmt = ['SUPER_ADMIN', 'MANAGEMENT'].includes(user.role);
+      const normalizedUser = {
+        ...user,
+        divisions: isSuperOrMgmt ? ['TANDON', 'GALLON', 'MOBIL_TANGKI', 'AIR_KAPAL', 'GAS_INDUSTRI'] : (user.divisions || ['TANDON'])
+      };
+      setSessionUser(normalizedUser); 
+      setLocalData('session_user', normalizedUser); 
+      return { success: true };
+    }
 
     const checkPortal = (listKey, divisionName, roleName, nameField) => {
       const list = getLocalData(listKey, []);
@@ -396,6 +414,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   const [newCustType, setNewCustType] = useState('PENGGUNA');
   const [newAddr, setNewAddr] = useState('');
   const [newWa, setNewWa] = useState('');
+  const [newCustomPrice, setNewCustomPrice] = useState('');
   const [addError, setAddError] = useState('');
 
   const todayStr = useMemo(() => getMakassarDateString(), []);
@@ -403,25 +422,28 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
 
   useEffect(() => {
     let unsubs = [];
+    const defaultFp = fallbackPrices[dbKeys.divType] || 20000;
     try {
       unsubs.push(onSnapshot(getDocPath('settings', dbKeys.config), snap => { 
         if(snap.exists() && Number(snap.data().price) > 0) {
           setGlobalPrice(Number(snap.data().price));
         } else {
-          setGlobalPrice(fallbackPrices[dbKeys.divType] || 20000);
+          setGlobalPrice(defaultFp);
         }
-      }, ()=>{}));
+      }, ()=>{ setGlobalPrice(defaultFp); }));
       
       unsubs.push(onSnapshot(getPublicPath(dbKeys.entity), snap => { 
         const l = snap.docs.map(d=>({id:d.id,...d.data()})); 
-        if(Array.isArray(l)) { setEntities(l); setLocalData(dbKeys.entity, l); } 
+        if(Array.isArray(l) && l.length > 0) { setEntities(l); setLocalData(dbKeys.entity, l); } 
       }, ()=>{}));
       
       unsubs.push(onSnapshot(getPublicPath('transactions'), snap => { 
         const l = snap.docs.map(d=>({id:d.id,...d.data()})); 
         if(Array.isArray(l)) { setAllTx(l); setLocalData('transactions', l); } 
       }, ()=>{}));
-    } catch(e){}
+    } catch(e){
+      setGlobalPrice(defaultFp);
+    }
     return () => unsubs.forEach(u => u && u());
   }, [dbKeys.entity, dbKeys.config, dbKeys.divType, fallbackPrices]);
 
@@ -473,7 +495,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
       [dbKeys.nameField]: cleanName, 
       address: newAddr.trim(),
       whatsapp: cleanWa,
-      price: 0, 
+      price: Number(newCustomPrice) || 0, 
       username: cleanUser, 
       password: '123456', 
       portalAccessEnabled: true,
@@ -491,7 +513,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     setEntities(updated); 
     setLocalData(dbKeys.entity, updated);
     
-    setIsAddOpen(false); setNewName(''); setNewAddr(''); setNewWa(''); setNewCompany(''); setNewCustType('PENGGUNA'); setAddError('');
+    setIsAddOpen(false); setNewName(''); setNewAddr(''); setNewWa(''); setNewCompany(''); setNewCustType('PENGGUNA'); setNewCustomPrice(''); setAddError('');
     try { 
       await setDoc(getDocPath(dbKeys.entity, docId), newEnt); 
     } catch(e){}
@@ -570,6 +592,8 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
             <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
               {filtered.map(ent => {
                 const count = todayActiveTx.filter(t => t.entityId === ent.id).reduce((s,t) => s + (t.quantity||1), 0);
+                const entPrice = Number(ent.price);
+                const displayItemPrice = (entPrice && entPrice > 0) ? entPrice : globalPrice;
                 return (
                   <div key={ent.id} className="flex justify-between items-center p-2.5 rounded-xl border bg-slate-50 border-slate-200 gap-2">
                     <div className="min-w-0 flex-1">
@@ -579,6 +603,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                       </div>
                       {ent.companyName && <p className="text-[10px] text-slate-500 truncate mt-0.5">PT: {ent.companyName}</p>}
                       {ent.agentName && <p className="text-[10px] text-slate-500 truncate mt-0.5">Agen: {ent.agentName}</p>}
+                      <p className="text-[10px] text-emerald-700 font-bold mt-0.5">Rp {displayItemPrice.toLocaleString('id-ID')} {entPrice > 0 ? '(Khusus)' : '(Master)'}</p>
                       {ent.address && <p className="text-[10px] text-slate-500 truncate mt-0.5">{ent.address}</p>}
                     </div>
                     {!isReadOnly && <div className="flex items-center gap-1 shrink-0">{getAddButtons(ent)}</div>}
@@ -673,6 +698,14 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
           <div>
             <label className="text-[10px] font-bold uppercase text-slate-500">No. WhatsApp (Wajib)</label>
             <input type="text" value={newWa} onChange={e=>setNewWa(e.target.value)} placeholder="08xxxxxxxxxx" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold" required />
+          </div>
+
+          <div>
+            <label className="text-[10px] font-bold uppercase text-emerald-700 flex items-center justify-between">
+              Harga Khusus (Rp)
+              <span className="text-[9px] text-slate-400 normal-case font-normal">*Kosongkan untuk mengikuti Master</span>
+            </label>
+            <input type="number" value={newCustomPrice} onChange={e=>setNewCustomPrice(e.target.value)} placeholder={`Master: Rp ${globalPrice.toLocaleString('id-ID')}`} className="w-full p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-sm font-black text-emerald-900" />
           </div>
           
           <Button type="submit" variant={buttonVariant} className="w-full py-3">Simpan Data & Akun</Button>
@@ -947,6 +980,7 @@ const AdminPanel = ({ onNavigateHome }) => {
   });
 
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
   const [newUserName, setNewUserName] = useState('');
   const [newUserUser, setNewUserUser] = useState('');
   const [newUserPwd, setNewUserPwd] = useState('123456');
@@ -1085,7 +1119,7 @@ const AdminPanel = ({ onNavigateHome }) => {
     } catch(err) {}
   };
 
-  const handleAddInternalUser = async (e) => {
+  const handleAddOrUpdateInternalUser = async (e) => {
     e.preventDefault();
     if (!canManageCredentials) return;
     const cleanName = newUserName.trim();
@@ -1094,20 +1128,46 @@ const AdminPanel = ({ onNavigateHome }) => {
     if (!cleanName || !cleanUser || !cleanPwd) return setUserAddError('Nama, username, dan password wajib diisi.');
     
     const safeAllUsers = Array.isArray(allUsers) ? allUsers : [];
-    if (safeAllUsers.some(u => u.username?.toLowerCase() === cleanUser)) return setUserAddError(`Username "@${cleanUser}" sudah digunakan!`);
+    if (safeAllUsers.some(u => u.username?.toLowerCase() === cleanUser && u.id !== editingUser?.id)) {
+      return setUserAddError(`Username "@${cleanUser}" sudah digunakan!`);
+    }
 
-    const userId = 'usr_' + Date.now();
+    const userId = editingUser ? editingUser.id : ('usr_' + Date.now());
     const newUserObj = {
-      id: userId, name: cleanName, username: cleanUser, password: cleanPwd, role: newUserRole,
-      divisions: newUserRole === 'MANAGEMENT' || newUserRole === 'SUPER_ADMIN' ? ['TANDON', 'GALLON', 'MOBIL_TANGKI', 'AIR_KAPAL', 'GAS_INDUSTRI'] : newUserDivs,
-      isActive: true, createdAt: Date.now()
+      id: userId, 
+      name: cleanName, 
+      username: cleanUser, 
+      password: cleanPwd, 
+      role: newUserRole,
+      divisions: ['SUPER_ADMIN', 'MANAGEMENT'].includes(newUserRole) ? ['TANDON', 'GALLON', 'MOBIL_TANGKI', 'AIR_KAPAL', 'GAS_INDUSTRI'] : newUserDivs,
+      isActive: editingUser ? (editingUser.isActive ?? true) : true, 
+      createdAt: editingUser ? editingUser.createdAt : Date.now()
     };
 
-    const updated = [...safeAllUsers, newUserObj];
-    setAllUsers(updated); setLocalData('all_users', updated);
+    const updated = editingUser
+      ? safeAllUsers.map(u => u.id === editingUser.id ? newUserObj : u)
+      : [...safeAllUsers, newUserObj];
+
+    setAllUsers(updated); 
+    setLocalData('all_users', updated);
     setIsAddUserOpen(false);
+    setEditingUser(null);
     setNewUserName(''); setNewUserUser(''); setNewUserPwd('123456'); setNewUserRole('OPERATOR'); setNewUserDivs(['TANDON']); setUserAddError('');
-    try { await setDoc(getDocPath('users', userId), newUserObj); } catch(e) {}
+    
+    try { 
+      await setDoc(getDocPath('users', userId), newUserObj); 
+    } catch(e) {}
+  };
+
+  const openEditUser = (u) => {
+    setEditingUser(u);
+    setNewUserName(u.name || '');
+    setNewUserUser(u.username || '');
+    setNewUserPwd(u.password || '123456');
+    setNewUserRole(u.role || 'OPERATOR');
+    setNewUserDivs(u.divisions || ['TANDON']);
+    setUserAddError('');
+    setIsAddUserOpen(true);
   };
 
   const togglePortalAccess = async (cust) => {
@@ -1159,7 +1219,7 @@ const AdminPanel = ({ onNavigateHome }) => {
           <div className="flex justify-between items-center border-b border-emerald-50 pb-2">
             <h3 className="font-black text-sm text-emerald-900">Manajemen User Staf</h3>
             {canManageCredentials && (
-              <Button onClick={()=>{setIsAddUserOpen(true); setUserAddError('');}} variant="emerald" className="py-1.5 px-3 text-xs"><Plus size={14}/> Tambah Staf</Button>
+              <Button onClick={()=>{setEditingUser(null); setNewUserName(''); setNewUserUser(''); setNewUserPwd('123456'); setNewUserRole('OPERATOR'); setNewUserDivs(['TANDON']); setIsAddUserOpen(true); setUserAddError('');}} variant="emerald" className="py-1.5 px-3 text-xs"><Plus size={14}/> Tambah Staf</Button>
             )}
           </div>
           <div className="space-y-2 max-h-96 overflow-y-auto">
@@ -1169,6 +1229,11 @@ const AdminPanel = ({ onNavigateHome }) => {
                   <span className="font-black uppercase text-emerald-900">{u.name} <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">{u.role}</span></span>
                   <p className="text-[10px] text-emerald-600">@{u.username} {u.divisions && `• Div: ${u.divisions.join(', ')}`}</p>
                 </div>
+                {canManageCredentials && (
+                  <button onClick={()=>openEditUser(u)} title="Edit Staf" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer transition-colors">
+                    <Edit size={15}/>
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -1258,12 +1323,12 @@ const AdminPanel = ({ onNavigateHome }) => {
         </Card>
       )}
 
-      <Modal isOpen={isAddUserOpen} onClose={()=>setIsAddUserOpen(false)} title="Tambah Staf Internal Baru">
-        <form onSubmit={handleAddInternalUser} className="space-y-3">
+      <Modal isOpen={isAddUserOpen} onClose={()=>setIsAddUserOpen(false)} title={editingUser ? "Edit Staf Internal" : "Tambah Staf Internal Baru"}>
+        <form onSubmit={handleAddOrUpdateInternalUser} className="space-y-3">
           {userAddError && <div className="p-2 bg-red-50 text-red-700 text-xs font-bold rounded-lg">{userAddError}</div>}
           <div>
             <label className="text-[10px] font-bold uppercase text-slate-500">Nama Lengkap</label>
-            <input type="text" value={newUserName} onChange={e=>{setNewUserName(e.target.value); setNewUserUser(e.target.value.replace(/[^a-zA-Z0-9]/g,'').toLowerCase());}} placeholder="NAMA LENGKAP STAF" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold" required autoFocus />
+            <input type="text" value={newUserName} onChange={e=>{setNewUserName(e.target.value); if(!editingUser) setNewUserUser(e.target.value.replace(/[^a-zA-Z0-9]/g,'').toLowerCase());}} placeholder="NAMA LENGKAP STAF" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold" required autoFocus />
           </div>
           <div>
             <label className="text-[10px] font-bold uppercase text-slate-500">Username Login</label>
@@ -1309,7 +1374,7 @@ const AdminPanel = ({ onNavigateHome }) => {
               </div>
             </div>
           )}
-          <Button type="submit" variant="emerald" className="w-full py-3">Simpan Staf Baru</Button>
+          <Button type="submit" variant="emerald" className="w-full py-3">{editingUser ? "Simpan Perubahan Staf" : "Simpan Staf Baru"}</Button>
         </form>
       </Modal>
 
@@ -1405,7 +1470,7 @@ const AdminPanel = ({ onNavigateHome }) => {
 };
 
 const DivisionSelector = ({ user, onSelectDivision }) => {
-  const isManagement = user.role === 'MANAGEMENT';
+  const isSuperOrMgmt = ['SUPER_ADMIN', 'MANAGEMENT'].includes(user.role);
   const divs = [
     { id: 'TANDON', name: 'Air Tandon', icon: Droplet, c: 'border-blue-200 bg-blue-50 text-blue-700' },
     { id: 'GALLON', name: 'Air Gallon', icon: Package, c: 'border-indigo-200 bg-indigo-50 text-indigo-700' },
@@ -1414,7 +1479,7 @@ const DivisionSelector = ({ user, onSelectDivision }) => {
     { id: 'GAS_INDUSTRI', name: 'Gas Industri', icon: Flame, c: 'border-orange-200 bg-orange-50 text-orange-700' },
   ];
   const userDivs = Array.isArray(user.divisions) ? user.divisions : [];
-  const allowed = isManagement ? divs : divs.filter(d => userDivs.includes(d.id));
+  const allowed = isSuperOrMgmt ? divs : divs.filter(d => userDivs.includes(d.id));
 
   return (
     <div className="max-w-md sm:max-w-xl mx-auto px-4 py-6 space-y-5 pb-24">
@@ -1431,9 +1496,9 @@ const DivisionSelector = ({ user, onSelectDivision }) => {
           {allowed.map(d => {
             const Icon = d.icon;
             return (
-              <Card key={d.id} onClick={()=>onSelectDivision(d.id)} className={`p-4 border-2 flex items-center justify-between cursor-pointer hover:shadow-md transition-all ${isManagement?'border-slate-300 bg-slate-100 text-slate-600':d.c}`}>
+              <Card key={d.id} onClick={()=>onSelectDivision(d.id)} className={`p-4 border-2 flex items-center justify-between cursor-pointer hover:shadow-md transition-all ${isSuperOrMgmt && user.role==='MANAGEMENT'?'border-slate-300 bg-slate-100 text-slate-600':d.c}`}>
                 <div className="flex items-center gap-3">
-                  <div className={`p-3 rounded-xl ${isManagement?'bg-slate-200 text-slate-700':'bg-white shadow-xs'}`}><Icon size={24}/></div>
+                  <div className={`p-3 rounded-xl ${isSuperOrMgmt && user.role==='MANAGEMENT'?'bg-slate-200 text-slate-700':'bg-white shadow-xs'}`}><Icon size={24}/></div>
                   <h4 className="font-extrabold text-sm uppercase">{d.name}</h4>
                 </div>
                 <ChevronRight size={18} />
