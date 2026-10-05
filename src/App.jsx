@@ -959,7 +959,7 @@ const AdminPanel = ({ onNavigateHome }) => {
   const [resetMsg, setResetMsg] = useState('');
 
   const custConfigs = {
-    TANDON: { key: 'tandon_drivers', nameField: 'name', prefix: 'td', label: 'Supir Tandon', priceKey: 'TANDON' },
+    TANDON: { key: 'tandon_drivers', nameField: 'name', prefix: 'td', label: 'Sopir Tandon', priceKey: 'TANDON' },
     TANGKI: { key: 'tangki_customers', nameField: 'name', prefix: 'mt', label: 'Pembeli Mobil Tangki', priceKey: 'TANGKI' },
     GALLON: { key: 'gallon_customers', nameField: 'name', prefix: 'gl', label: 'Pembeli Air Gallon', priceKey: 'GALLON' },
     KAPAL: { key: 'kapal_ships', nameField: 'shipName', prefix: 'ak', label: 'Kapal', priceKey: 'KAPAL' },
