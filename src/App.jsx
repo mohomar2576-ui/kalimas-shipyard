@@ -112,7 +112,7 @@ const GalanganKalimasLogo = ({ size = 'md', variant = 'color', className = '' })
   return (
     <div className={`flex items-center gap-2.5 select-none ${className}`}>
       <img 
-        src="GK Logo Only.svg" 
+        src="GK Logo Only.png" 
         alt="Galangan Kalimas Logo" 
         className={`${s.h} w-auto object-contain shrink-0 drop-shadow-sm`} 
       />
