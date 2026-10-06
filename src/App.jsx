@@ -112,9 +112,13 @@ const GalanganKalimasLogo = ({ size = 'md', variant = 'color', className = '' })
   return (
     <div className={`flex items-center gap-2.5 select-none ${className}`}>
       <img 
-        src="GK Logo Only.png" 
+        src="GK Logo Only.svg" 
         alt="Galangan Kalimas Logo" 
         className={`${s.h} w-auto object-contain shrink-0 drop-shadow-sm`} 
+        onError={(e) => {
+          e.target.onerror = null; 
+          e.target.src = "GK Logo Only.png"; 
+        }}
       />
       <div className="flex flex-col leading-none justify-center">
         <span className={`font-black tracking-wider uppercase font-sans ${s.t1} ${variant==='light'?'text-white':'text-slate-900'}`}>KALIMAS</span>
@@ -134,8 +138,7 @@ const Button = ({ children, variant = 'primary', className = '', ...props }) => 
     purple: "bg-purple-600 hover:bg-purple-700 text-white shadow-purple-500/20",
     orange: "bg-orange-600 hover:bg-orange-700 text-white shadow-orange-500/20",
     outline: "border-2 border-slate-300 hover:bg-slate-100 text-slate-700 shadow-none",
-    danger: "bg-red-600 hover:bg-red-700 text-white shadow-red-500/20",
-    darkGreen: "bg-emerald-800 hover:bg-emerald-900 text-white shadow-emerald-900/20"
+    danger: "bg-red-600 hover:bg-red-700 text-white shadow-red-500/20"
   };
   return <button className={`${base} ${v[variant] || v.primary} ${className}`} {...props}>{children}</button>;
 };
@@ -151,7 +154,7 @@ const Modal = ({ isOpen, onClose, title, children }) => {
       <div className="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl border border-slate-100 space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center pb-2 border-b">
           <h3 className="font-bold text-base text-slate-900">{title}</h3>
-          <button onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 cursor-pointer"><X size={18} /></button>
+          <button type="button" onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 cursor-pointer"><X size={18} /></button>
         </div>
         {children}
       </div>
@@ -197,6 +200,19 @@ const AuthProvider = ({ children }) => {
               setLocalData('all_users', list);
               setSystemInitialized(true); 
               setLocalData('sys_init', true);
+              
+              if (sessionUser) {
+                const updatedUser = list.find(u => u.id === sessionUser.id);
+                if (updatedUser) {
+                  const isSuperOrMgmt = ['SUPER_ADMIN', 'MANAGEMENT'].includes(updatedUser.role);
+                  const normalizedUpdatedUser = {
+                    ...updatedUser,
+                    divisions: isSuperOrMgmt ? ['TANDON', 'GALLON', 'MOBIL_TANGKI', 'AIR_KAPAL', 'GAS_INDUSTRI'] : (updatedUser.divisions || ['TANDON'])
+                  };
+                  setSessionUser(normalizedUpdatedUser);
+                  setLocalData('session_user', normalizedUpdatedUser);
+                }
+              }
             }
             setLoading(false);
           }, () => { setLoading(false); });
@@ -216,7 +232,7 @@ const AuthProvider = ({ children }) => {
       if (unsub) unsub(); 
       window.removeEventListener('focus', handleFocus);
     };
-  }, []);
+  }, [sessionUser]);
 
   const login = (username, password) => {
     const cleanUsername = username.trim().toLowerCase();
@@ -302,19 +318,27 @@ const SystemInitScreen = () => {
         { key: 'gallon_config', price: 6000 },
         { key: 'tangki_config', price: 350000 },
         { key: 'kapal_config', price: 50000 },
-        { key: 'gas_config', price: 150000 }
+        { key: 'gas_config', products: {
+          'Oxygen, 6 m³': 150000,
+          'Acetylene': 550000,
+          'Argon, 6 m³': 550000,
+          'Nitrogen, 6 m³': 400000,
+          'CO₂, 25 kg': 550000,
+          'LPG, 50 kg': 1500000,
+          'LPG, 12 kg': 275000,
+          'Oxygen Medis, 2 m³': 100000,
+          'Oxygen Medis, 6 m³': 150000
+        }}
       ];
       
       await Promise.all(defaultConfigs.map(conf => 
         setDoc(getDocPath('settings', conf.key), { 
-          price: conf.price, 
+          ...conf,
           updatedBy: 'SYSTEM_INIT', 
           updatedAt: Date.now() 
         }).catch(()=>{})
       ));
-    } catch(err){
-      console.warn("Inisialisasi tersimpan di local cache:", err);
-    }
+    } catch(err){}
   };
 
   return (
@@ -368,7 +392,7 @@ const DivisionHeader = ({ title, icon: Icon, price, priceLabel, colorClass, onNa
         <h1 className="text-xl font-black flex items-center gap-1.5"><Icon size={20} className={colorClass} /> {title}</h1>
       </div>
     </div>
-    <span className={`text-xs font-bold px-3 py-1 rounded-full border bg-slate-50 ${colorClass}`}>Rp {price.toLocaleString('id-ID')} {priceLabel}</span>
+    {price > 0 && <span className={`text-xs font-bold px-3 py-1 rounded-full border bg-slate-50 ${colorClass}`}>Rp {price.toLocaleString('id-ID')} {priceLabel}</span>}
   </div>
 );
 
@@ -406,6 +430,18 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   const [search, setSearch] = useState('');
   
   const [globalPrice, setGlobalPrice] = useState(() => fallbackPrices[dbKeys.divType] || 20000); 
+  const [gasMasterConfig, setGasMasterConfig] = useState({
+    'Oxygen, 6 m³': 150000,
+    'Acetylene': 550000,
+    'Argon, 6 m³': 550000,
+    'Nitrogen, 6 m³': 400000,
+    'CO₂, 25 kg': 550000,
+    'LPG, 50 kg': 1500000,
+    'LPG, 12 kg': 275000,
+    'Oxygen Medis, 2 m³': 100000,
+    'Oxygen Medis, 6 m³': 150000
+  });
+  const [customerGasSelections, setCustomerGasSelections] = useState({});
   const [shiftViewDate, setShiftViewDate] = useState('TODAY');
 
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -414,8 +450,10 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   const [newCustType, setNewCustType] = useState('PENGGUNA');
   const [newAddr, setNewAddr] = useState('');
   const [newWa, setNewWa] = useState('');
-  const [newCustomPrice, setNewCustomPrice] = useState('');
   const [addError, setAddError] = useState('');
+
+  const [customQtyRow, setCustomQtyRow] = useState(null);
+  const [customQtyVal, setCustomQtyVal] = useState('');
 
   const todayStr = useMemo(() => getMakassarDateString(), []);
   const shiftActiveDateStr = shiftViewDate === 'TODAY' ? todayStr : getAdjacentDateString(todayStr, -1);
@@ -425,8 +463,15 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     const defaultFp = fallbackPrices[dbKeys.divType] || 20000;
     try {
       unsubs.push(onSnapshot(getDocPath('settings', dbKeys.config), snap => { 
-        if(snap.exists() && Number(snap.data().price) > 0) {
-          setGlobalPrice(Number(snap.data().price));
+        if(snap.exists()) {
+          const dat = snap.data();
+          if (dbKeys.divType === 'GAS_INDUSTRI' && dat.products) {
+            setGasMasterConfig(dat.products);
+          } else if (Number(dat.price) > 0) {
+            setGlobalPrice(Number(dat.price));
+          } else {
+            setGlobalPrice(defaultFp);
+          }
         } else {
           setGlobalPrice(defaultFp);
         }
@@ -447,118 +492,169 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     return () => unsubs.forEach(u => u && u());
   }, [dbKeys.entity, dbKeys.config, dbKeys.divType, fallbackPrices]);
 
+  const activeTx = allTx.filter(t => t.divisionType === dbKeys.divType);
+  const todayActiveTx = activeTx.filter(t => t.dateStr === todayStr && t.status !== 'VOIDED');
+  const myTodayTx = todayActiveTx.filter(t => t.operatorName === user.name);
+  
+  const todayVol = todayActiveTx.reduce((s, t) => s + (t.quantity || 1), 0);
+  const myTodayVol = myTodayTx.reduce((s, t) => s + (t.quantity || 1), 0);
+  const todayRev = todayActiveTx.reduce((s, t) => s + (t.totalAmount || 0), 0);
+  const myTodayRev = myTodayTx.reduce((s, t) => s + (t.totalAmount || 0), 0);
+
+  const displayTxList = activeTx.filter(t => t.dateStr === shiftActiveDateStr);
+  const displayActiveTxList = displayTxList.filter(t => t.status !== 'VOIDED');
+  const displayMyTxList = displayActiveTxList.filter(t => t.operatorName === user.name);
+  
+  const tabVol = displayActiveTxList.reduce((s, t) => s + (t.quantity || 1), 0);
+  const myTabVol = displayMyTxList.reduce((s, t) => s + (t.quantity || 1), 0);
+  const tabRev = displayActiveTxList.reduce((s, t) => s + (t.totalAmount || 0), 0);
+  const myTabRev = displayMyTxList.reduce((s, t) => s + (t.totalAmount || 0), 0);
+
+  const filtered = entities.filter(e => {
+    const term = search.toLowerCase();
+    const nm = (e.name || e.shipName || '').toLowerCase();
+    const cp = (e.companyName || e.agentName || '').toLowerCase();
+    return nm.includes(term) || cp.includes(term);
+  });
+
   const handleAddTx = async (entity, qty = 1) => {
     if (isReadOnly || !entity) return;
     
-    const safeGlobalPrice = (globalPrice > 0) ? globalPrice : (fallbackPrices[dbKeys.divType] || 20000);
-    const customEntPrice = Number(entity.price);
-    const unitP = (customEntPrice && customEntPrice > 0) ? customEntPrice : safeGlobalPrice;
+    let unitPrice = globalPrice > 0 ? globalPrice : (fallbackPrices[dbKeys.divType] || 20000);
+    let activeGasProd = null;
     
-    const total = qty * unitP;
-    
-    const docId = `tx_${dbKeys.prefix}_${Date.now()}`;
-    const newTx = { 
-      id: docId, entityId: entity.id, entityName: entity.name || entity.shipName, 
-      operatorName: user.name, divisionType: dbKeys.divType, quantity: qty, 
-      unitPrice: unitP, totalAmount: total, timestamp: Date.now(), 
-      dateStr: todayStr, status: 'COMPLETED' 
+    if (dbKeys.divType === 'GAS_INDUSTRI') {
+      activeGasProd = customerGasSelections[entity.id] || Object.keys(gasMasterConfig)[0] || 'Oxygen, 6 m³';
+      const customGas = Number(entity.gasCustomPrices?.[activeGasProd]);
+      unitPrice = (customGas > 0) ? customGas : (gasMasterConfig[activeGasProd] || 150000);
+    } else {
+      const entPrice = Number(entity.price);
+      unitPrice = (entPrice > 0) ? entPrice : (globalPrice > 0 ? globalPrice : (fallbackPrices[dbKeys.divType] || 20000));
+    }
+
+    const txId = 'tx_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+    const txPayload = {
+      entityId: entity.id,
+      entityName: entity.name || entity.shipName,
+      divisionType: dbKeys.divType,
+      quantity: qty,
+      unitPrice: unitPrice,
+      totalAmount: unitPrice * qty,
+      operatorName: user.name,
+      operatorId: user.id,
+      timestamp: Date.now(),
+      dateStr: todayStr,
+      status: 'COMPLETED'
     };
     
-    const safeTx = Array.isArray(allTx) ? allTx : [];
-    const updated = [...safeTx, newTx];
-    setAllTx(updated); setLocalData('transactions', updated);
-    try { await setDoc(getDocPath('transactions', docId), newTx); } catch(e){}
+    if (activeGasProd) txPayload.gasProduct = activeGasProd;
+
+    const updatedTxList = [...allTx, { id: txId, ...txPayload }];
+    setAllTx(updatedTxList);
+    setLocalData('transactions', updatedTxList);
+
+    try {
+      await setDoc(getDocPath('transactions', txId), txPayload);
+    } catch (err) {
+      console.warn("Firebase write warning (Permission/Offline), operating via local storage fallback:", err);
+    }
+  };
+
+  const handleUndo = async (txId) => {
+    if (isReadOnly) return;
+    
+    const updatedTxList = allTx.map(t => t.id === txId ? { ...t, status: 'VOIDED', voidedAt: Date.now(), voidedBy: user.name } : t);
+    setAllTx(updatedTxList);
+    setLocalData('transactions', updatedTxList);
+
+    try { 
+      await updateDoc(getDocPath('transactions', txId), { status: 'VOIDED', voidedAt: Date.now(), voidedBy: user.name }); 
+    } catch(err){
+      console.warn("Firebase void warning:", err);
+    }
   };
 
   const handleAddNewEntity = async (e) => {
     e.preventDefault();
     const cleanName = newName.trim().toUpperCase();
-    const cleanWa = newWa.trim();
-    if (!cleanName || !cleanWa) {
-      setAddError('Nama dan No. WhatsApp wajib diisi!');
-      return;
-    }
-
-    const nameFieldKey = dbKeys.nameField;
-    const safeEntities = Array.isArray(entities) ? entities : [];
-    const isDuplicate = safeEntities.some(ent => (ent[nameFieldKey] || '').toUpperCase() === cleanName);
-    if (isDuplicate) {
-      setAddError(`Nama "${cleanName}" sudah terdaftar! Nama harus unik.`);
-      return;
-    }
-
-    const docId = `${dbKeys.prefix}_${Date.now()}`;
-    const cleanUser = cleanName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() + Math.floor(Math.random() * 900 + 100);
+    if (!cleanName) return setAddError('Nama wajib diisi.');
     
-    const newEnt = { 
-      id: docId, 
-      [dbKeys.nameField]: cleanName, 
+    const safeEntities = Array.isArray(entities) ? entities : [];
+    if (safeEntities.some(ent => (ent.name || ent.shipName || '').toUpperCase() === cleanName)) {
+      return setAddError(`Nama "${cleanName}" sudah terdaftar.`);
+    }
+
+    const generatedUser = cleanName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() + Math.floor(Math.random() * 900 + 100);
+    
+    const newEntity = {
+      id: `${dbKeys.prefix}_${Date.now()}`,
       address: newAddr.trim(),
-      whatsapp: cleanWa,
-      price: Number(newCustomPrice) || 0, 
-      username: cleanUser, 
-      password: '123456', 
+      whatsapp: newWa.trim(),
+      username: generatedUser,
+      password: '123456',
       portalAccessEnabled: true,
-      createdAt: Date.now() 
+      price: 0,
+      gasCustomPrices: {},
+      createdAt: Date.now()
     };
 
-    if (dbKeys.divType === 'MOBIL_TANGKI' || dbKeys.divType === 'GAS_INDUSTRI') newEnt.companyName = newCompany.trim();
-    if (dbKeys.divType === 'AIR_KAPAL') newEnt.agentName = newCompany.trim();
+    newEntity[dbKeys.nameField] = cleanName;
+    if (dbKeys.divType === 'MOBIL_TANGKI' || dbKeys.divType === 'GAS_INDUSTRI') newEntity.companyName = newCompany.trim();
+    if (dbKeys.divType === 'AIR_KAPAL') newEntity.agentName = newCompany.trim();
     if (dbKeys.divType === 'GALLON') {
-      newEnt.customerType = newCustType;
-      if (newCustType === 'RESELLER') newEnt.resellerName = newCompany.trim();
+      newEntity.customerType = newCustType;
+      if (newCustType === 'RESELLER') newEntity.resellerName = newCompany.trim();
     }
+
+    const updatedEntities = [...safeEntities, newEntity];
+    setEntities(updatedEntities);
+    setLocalData(dbKeys.entity, updatedEntities);
+    setIsAddOpen(false);
     
-    const updated = [...safeEntities, newEnt];
-    setEntities(updated); 
-    setLocalData(dbKeys.entity, updated);
-    
-    setIsAddOpen(false); setNewName(''); setNewAddr(''); setNewWa(''); setNewCompany(''); setNewCustType('PENGGUNA'); setNewCustomPrice(''); setAddError('');
     try { 
-      await setDoc(getDocPath(dbKeys.entity, docId), newEnt); 
-    } catch(e){}
+      await setDoc(getDocPath(dbKeys.entity, newEntity.id), newEntity); 
+    } catch (err) {
+      console.warn("Firebase entity add warning:", err);
+    }
   };
-
-  const handleUndo = async (txId) => {
-    const safeTx = Array.isArray(allTx) ? allTx : [];
-    const txToVoid = safeTx.find(t => t.id === txId);
-    if (!txToVoid) return;
-    const isMyTxToday = txToVoid.operatorName === user.name && txToVoid.dateStr === todayStr;
-    if (isReadOnly || (!canVoidAny && !isMyTxToday)) return;
-    const updated = safeTx.map(t => t.id === txId ? { ...t, status: 'VOIDED', voidedBy: user.name } : t);
-    setAllTx(updated); setLocalData('transactions', updated);
-    try { await updateDoc(getDocPath('transactions', txId), { status: 'VOIDED', voidedBy: user.name }); } catch(e){}
-  };
-
-  const safeEntities = Array.isArray(entities) ? entities : [];
-  const filtered = safeEntities.filter(e => (e.name||e.shipName)?.toLowerCase().includes(search.toLowerCase()));
-  const safeAllTx = Array.isArray(allTx) ? allTx : [];
-  const todayActiveTx = safeAllTx.filter(t => t.divisionType === dbKeys.divType && t.dateStr === todayStr && t.status !== 'VOIDED');
-  const todayVol = todayActiveTx.reduce((s, t) => s + (t.quantity || 1), 0);
-  const todayRev = todayActiveTx.reduce((s, t) => s + (t.totalAmount || 0), 0);
-  const myTodayTx = todayActiveTx.filter(t => t.operatorName === user.name);
-  const myTodayVol = myTodayTx.reduce((s, t) => s + (t.quantity || 1), 0);
-  const myTodayRev = myTodayTx.reduce((s, t) => s + (t.totalAmount || 0), 0);
-  const displayTxList = safeAllTx.filter(t => t.divisionType === dbKeys.divType && t.dateStr === shiftActiveDateStr);
-
-  const validDisplayTx = displayTxList.filter(t => t.status !== 'VOIDED');
-  const tabVol = validDisplayTx.reduce((s, t) => s + (t.quantity || 1), 0);
-  const tabRev = validDisplayTx.reduce((s, t) => s + (t.totalAmount || 0), 0);
-  const myTabTx = validDisplayTx.filter(t => t.operatorName === user.name);
-  const myTabVol = myTabTx.reduce((s, t) => s + (t.quantity || 1), 0);
-  const myTabRev = myTabTx.reduce((s, t) => s + (t.totalAmount || 0), 0);
 
   const getAddButtons = (entity) => {
-    if (isReadOnly) return null;
-    const lastMyTxForEntity = todayActiveTx.slice().reverse().find(t => t.entityId === entity.id && t.operatorName === user.name && t.status !== 'VOIDED');
-    let btns = null;
-    if (dbKeys.divType === 'TANDON' || dbKeys.divType === 'MOBIL_TANGKI') {
-      btns = <button onClick={()=>handleAddTx(entity, 1)} className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-xs cursor-pointer"><Plus size={14}/> +1</button>;
-    } else if (dbKeys.divType === 'GALLON') {
-      btns = [1, 5, 10, 20].map(v => <button key={v} onClick={()=>handleAddTx(entity, v)} className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] rounded-lg shadow-xs cursor-pointer">+{v}</button>);
-    } else if (dbKeys.divType === 'AIR_KAPAL' || dbKeys.divType === 'GAS_INDUSTRI') {
-      btns = [10, 20, 50].map(v => <button key={v} onClick={()=>handleAddTx(entity, v)} className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] rounded-lg shadow-xs cursor-pointer">+{v}</button>);
+    const lastMyTxForEntity = activeTx.slice().reverse().find(t => t.entityId === entity.id && t.operatorName === user.name && t.dateStr === todayStr && t.status !== 'VOIDED');
+    let btns;
+    
+    if (dbKeys.divType === 'GAS_INDUSTRI') {
+      const isCustomizing = customQtyRow === entity.id;
+      if (isCustomizing) {
+        btns = (
+          <div className="flex items-center gap-1 animate-in fade-in slide-in-from-right-2">
+            <input 
+              type="number" min="1" autoFocus 
+              value={customQtyVal} onChange={e=>setCustomQtyVal(e.target.value)} 
+              onWheel={(e) => e.target.blur()}
+              className="w-14 p-1 text-xs font-bold border border-orange-300 rounded-lg text-center outline-none focus:ring-1 focus:ring-orange-500" 
+              placeholder="Jml" 
+            />
+            <button onClick={()=>{const q = parseInt(customQtyVal); if(q>0) handleAddTx(entity, q); setCustomQtyRow(null); setCustomQtyVal('');}} className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] rounded-lg cursor-pointer shadow-xs">✔</button>
+            <button onClick={()=>{setCustomQtyRow(null); setCustomQtyVal('');}} className="px-2 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-600 font-black text-[11px] rounded-lg cursor-pointer shadow-xs">✖</button>
+          </div>
+        );
+      } else {
+        btns = (
+          <div className="flex items-center gap-1">
+            {[1, 5, 10].map(v => <button key={v} onClick={()=>handleAddTx(entity, v)} className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] rounded-lg shadow-xs cursor-pointer">+{v}</button>)}
+            <button onClick={()=>setCustomQtyRow(entity.id)} className="px-2 py-1.5 bg-orange-600 hover:bg-orange-700 text-white font-black text-[11px] rounded-lg shadow-xs cursor-pointer">Kustom</button>
+          </div>
+        );
+      }
+    } else {
+      const qtys = dbKeys.divType === 'AIR_KAPAL' ? [10, 20, 50] : dbKeys.divType === 'GALLON' ? [1, 5, 10, 20] : [1];
+      btns = (
+        <div className="flex items-center gap-1">
+          {qtys.map(v => <button key={v} onClick={()=>handleAddTx(entity, v)} className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] rounded-lg shadow-xs cursor-pointer">+{v}</button>)}
+        </div>
+      );
     }
+
     return (
       <div className="flex items-center gap-1.5">
         {lastMyTxForEntity && (
@@ -570,10 +666,12 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   };
 
   const formLabel = dbKeys.divType === 'TANDON' ? 'Nama Supir' : dbKeys.divType === 'AIR_KAPAL' ? 'Nama Kapal' : 'Nama Pembeli';
+  const displayHeaderPrice = dbKeys.divType === 'GAS_INDUSTRI' ? 0 : (globalPrice > 0 ? globalPrice : (fallbackPrices[dbKeys.divType] || 20000));
 
   return (
     <div className="max-w-md sm:max-w-xl mx-auto px-3 sm:px-4 py-4 pb-24 space-y-4">
-      <DivisionHeader title={title} icon={icon} price={globalPrice} priceLabel={priceLabel} colorClass={textClass} onNavigateHome={onNavigateHome} />
+      <DivisionHeader title={title} icon={icon} price={displayHeaderPrice} priceLabel={priceLabel} colorClass={textClass} onNavigateHome={onNavigateHome} />
+      
       <DivisionSplitStatsCards todayVol={todayVol} myTodayVol={myTodayVol} todayRev={todayRev} myTodayRev={myTodayRev} unitLabel={unitLabel} />
 
       <div className="grid grid-cols-2 gap-1 bg-slate-200 p-1 rounded-2xl text-xs font-bold">
@@ -588,14 +686,97 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
               <label className="text-xs font-bold text-slate-700 uppercase flex items-center gap-1"><Users size={14} className={textClass}/> Pilih {formLabel}</label>
               {canAddEntity && <Button onClick={()=>{setIsAddOpen(true); setAddError('');}} variant={buttonVariant} className="py-1.5 px-3 text-[11px]"><Plus size={14} /> Baru</Button>}
             </div>
-            <input type="text" placeholder="Cari nama..." value={search} onChange={e=>setSearch(e.target.value)} className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold uppercase outline-none focus:ring-2 focus:ring-emerald-500" />
+            
+            {/* Search Input with Quick Erase Button */}
+            <div className="relative">
+              <input 
+                type="text" 
+                placeholder="Cari nama..." 
+                value={search} 
+                onChange={e=>setSearch(e.target.value)} 
+                className="w-full p-2.5 pr-9 bg-slate-50 border rounded-xl text-xs font-bold uppercase outline-none focus:ring-2 focus:ring-emerald-500" 
+              />
+              {search && (
+                <button 
+                  type="button" 
+                  onClick={() => setSearch('')} 
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 rounded-full cursor-pointer transition-colors"
+                  title="Hapus pencarian"
+                >
+                  <X size={15} />
+                </button>
+              )}
+            </div>
+
             <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
               {filtered.map(ent => {
                 const count = todayActiveTx.filter(t => t.entityId === ent.id).reduce((s,t) => s + (t.quantity||1), 0);
+                
+                if (dbKeys.divType === 'GAS_INDUSTRI') {
+                  const currentGasProduct = customerGasSelections[ent.id] || Object.keys(gasMasterConfig)[0] || 'Oxygen, 6 m³';
+                  const gasCustPrice = Number(ent.gasCustomPrices?.[currentGasProduct]);
+                  let displayItemPrice = 0;
+                  let isCustomBadge = false;
+
+                  if (gasCustPrice && gasCustPrice > 0) {
+                    displayItemPrice = gasCustPrice;
+                    isCustomBadge = true;
+                  } else {
+                    displayItemPrice = gasMasterConfig[currentGasProduct] || 150000;
+                  }
+
+                  return (
+                    <div key={ent.id} className="flex flex-col p-3.5 rounded-2xl border bg-white border-orange-200 gap-2.5 hover:bg-orange-50/50 transition-colors shadow-sm">
+                      <div className="flex justify-between items-start">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-black uppercase text-slate-900 truncate">{ent.name||ent.shipName}</span>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 shrink-0">(Total: {count})</span>
+                          </div>
+                          {ent.companyName && <p className="text-[10px] text-slate-500 truncate mt-0.5">PT: {ent.companyName}</p>}
+                          {ent.address && <p className="text-[10px] text-slate-500 truncate mt-0.5">{ent.address}</p>}
+                        </div>
+                      </div>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between border-t border-orange-100 pt-2.5 mt-1 gap-2">
+                        <div className="flex flex-col gap-1 w-full sm:w-60">
+                          <select
+                            value={currentGasProduct}
+                            onChange={e => setCustomerGasSelections({...customerGasSelections, [ent.id]: e.target.value})}
+                            className="w-full p-2 bg-orange-50 border border-orange-200 rounded-xl text-[11px] font-black text-orange-950 outline-none focus:ring-2 focus:ring-orange-400 shadow-inner cursor-pointer"
+                          >
+                            {Object.keys(gasMasterConfig).map(gpName => {
+                              const isCustom = Number(ent.gasCustomPrices?.[gpName]) > 0;
+                              const price = isCustom ? Number(ent.gasCustomPrices[gpName]) : (gasMasterConfig[gpName] || 0);
+                              return (
+                                <option key={gpName} value={gpName}>
+                                  {gpName} - Rp {price.toLocaleString('id-ID')} {isCustom ? '(Khusus)' : ''}
+                                </option>
+                              )
+                            })}
+                          </select>
+                          <span className="text-[10px] text-orange-700 font-bold px-1">
+                            Harga: Rp {displayItemPrice.toLocaleString('id-ID')} {isCustomBadge ? '(Khusus)' : '(Master)'}
+                          </span>
+                        </div>
+                        {!isReadOnly && <div className="flex items-center gap-1 shrink-0 self-end sm:self-auto">{getAddButtons(ent)}</div>}
+                      </div>
+                    </div>
+                  );
+                }
+
+                let displayItemPrice = 0;
+                let isCustomBadge = false;
+
                 const entPrice = Number(ent.price);
-                const displayItemPrice = (entPrice && entPrice > 0) ? entPrice : globalPrice;
+                if (entPrice && entPrice > 0) {
+                  displayItemPrice = entPrice;
+                  isCustomBadge = true;
+                } else {
+                  displayItemPrice = globalPrice > 0 ? globalPrice : (fallbackPrices[dbKeys.divType] || 20000);
+                }
+
                 return (
-                  <div key={ent.id} className="flex justify-between items-center p-2.5 rounded-xl border bg-slate-50 border-slate-200 gap-2">
+                  <div key={ent.id} className="flex justify-between items-center p-2.5 rounded-xl border bg-slate-50 border-slate-200 gap-2 hover:bg-slate-100 transition-colors">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-black uppercase text-slate-900 truncate">{ent.name||ent.shipName}</span>
@@ -603,7 +784,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                       </div>
                       {ent.companyName && <p className="text-[10px] text-slate-500 truncate mt-0.5">PT: {ent.companyName}</p>}
                       {ent.agentName && <p className="text-[10px] text-slate-500 truncate mt-0.5">Agen: {ent.agentName}</p>}
-                      <p className="text-[10px] text-emerald-700 font-bold mt-0.5">Rp {displayItemPrice.toLocaleString('id-ID')} {entPrice > 0 ? '(Khusus)' : '(Master)'}</p>
+                      <p className="text-[10px] text-emerald-700 font-bold mt-0.5">Rp {displayItemPrice.toLocaleString('id-ID')} {isCustomBadge ? '(Khusus)' : '(Master)'}</p>
                       {ent.address && <p className="text-[10px] text-slate-500 truncate mt-0.5">{ent.address}</p>}
                     </div>
                     {!isReadOnly && <div className="flex items-center gap-1 shrink-0">{getAddButtons(ent)}</div>}
@@ -632,7 +813,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
               {displayTxList.length === 0 ? <p className="text-xs text-slate-400 text-center py-6 italic">Belum ada transaksi.</p> : displayTxList.slice().reverse().map(tx => (
                 <div key={tx.id} className="flex justify-between items-center p-2.5 bg-slate-50 rounded-xl text-xs border border-slate-100">
                   <div>
-                    <p className="font-extrabold uppercase">{tx.entityName}</p>
+                    <p className="font-extrabold uppercase">{tx.entityName} {tx.gasProduct && <span className="text-[10px] font-normal text-orange-700">({tx.gasProduct})</span>}</p>
                     <p className="text-[10px] text-slate-400">{getMakassarTimeString(tx.timestamp)} WITA — {tx.quantity} {unitLabel} — Op: {tx.operatorName}</p>
                   </div>
                   <div className="text-right flex items-center gap-2">
@@ -654,6 +835,9 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
       <Modal isOpen={isAddOpen} onClose={()=>setIsAddOpen(false)} title={`Tambah ${formLabel}`}>
         <form onSubmit={handleAddNewEntity} className="space-y-3">
           {addError && <div className="p-2 bg-red-50 text-red-700 text-xs font-bold rounded-lg">{addError}</div>}
+          <div className="p-2.5 bg-slate-100 text-slate-600 rounded-xl text-[10px] font-bold text-center mb-3">
+            Menambahkan pelanggan di sini otomatis mengikuti <span className="text-emerald-700 font-black">Master Harga</span>. Untuk harga khusus, gunakan Panel Admin.
+          </div>
           <div>
             <label className="text-[10px] font-bold uppercase text-slate-500">{formLabel} (Wajib Unik)</label>
             <input type="text" value={newName} onChange={e=>setNewName(e.target.value)} placeholder={`Input ${formLabel}...`} className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold uppercase" required autoFocus />
@@ -696,19 +880,11 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
             <input type="text" value={newAddr} onChange={e=>setNewAddr(e.target.value)} placeholder="Alamat lengkap lokasi" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold" />
           </div>
           <div>
-            <label className="text-[10px] font-bold uppercase text-slate-500">No. WhatsApp (Wajib)</label>
-            <input type="text" value={newWa} onChange={e=>setNewWa(e.target.value)} placeholder="08xxxxxxxxxx" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold" required />
-          </div>
-
-          <div>
-            <label className="text-[10px] font-bold uppercase text-emerald-700 flex items-center justify-between">
-              Harga Khusus (Rp)
-              <span className="text-[9px] text-slate-400 normal-case font-normal">*Kosongkan untuk mengikuti Master</span>
-            </label>
-            <input type="number" value={newCustomPrice} onChange={e=>setNewCustomPrice(e.target.value)} placeholder={`Master: Rp ${globalPrice.toLocaleString('id-ID')}`} className="w-full p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-sm font-black text-emerald-900" />
+            <label className="text-[10px] font-bold uppercase text-slate-500">No. WhatsApp {dbKeys.divType === 'TANDON' ? '(Wajib)' : '(Opsional)'}</label>
+            <input type="text" value={newWa} onChange={e=>setNewWa(e.target.value)} placeholder="08xxxxxxxxxx" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold" required={dbKeys.divType === 'TANDON'} />
           </div>
           
-          <Button type="submit" variant={buttonVariant} className="w-full py-3">Simpan Data & Akun</Button>
+          <Button type="submit" variant={buttonVariant} className="w-full py-3 mt-4">Simpan Pelanggan Baru</Button>
         </form>
       </Modal>
     </div>
@@ -967,7 +1143,19 @@ const AdminPanel = ({ onNavigateHome }) => {
   
   const canManageCredentials = ['ADMIN', 'SUPER_ADMIN'].includes(sessionUser.role);
   
-  const [prices, setPrices] = useState({ TANDON: 20000, GALLON: 6000, TANGKI: 350000, KAPAL: 50000, GAS: 150000 });
+  const [prices, setPrices] = useState({ TANDON: 20000, GALLON: 6000, TANGKI: 350000, KAPAL: 50000 });
+  const [gasProducts, setGasProducts] = useState({
+    'Oxygen, 6 m³': 150000,
+    'Acetylene': 550000,
+    'Argon, 6 m³': 550000,
+    'Nitrogen, 6 m³': 400000,
+    'CO₂, 25 kg': 550000,
+    'LPG, 50 kg': 1500000,
+    'LPG, 12 kg': 275000,
+    'Oxygen Medis, 2 m³': 100000,
+    'Oxygen Medis, 6 m³': 150000
+  });
+
   const [custData, setCustData] = useState([]);
   
   const [isCustModalOpen, setIsCustModalOpen] = useState(false);
@@ -976,7 +1164,8 @@ const AdminPanel = ({ onNavigateHome }) => {
   
   const [custForm, setCustForm] = useState({
       name: '', address: '', whatsapp: '', username: '', password: '',
-      companyName: '', agentName: '', customerType: 'PENGGUNA', resellerName: '', customPrice: ''
+      companyName: '', agentName: '', customerType: 'PENGGUNA', resellerName: '', customPrice: '',
+      gasCustomPrices: {}
   });
 
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
@@ -1007,7 +1196,11 @@ const AdminPanel = ({ onNavigateHome }) => {
       unsubs.push(onSnapshot(getDocPath('settings', 'gallon_config'), snap => { if(snap.exists()) setPrices(p=>({...p, GALLON: snap.data().price||6000})); }, ()=>{}));
       unsubs.push(onSnapshot(getDocPath('settings', 'tangki_config'), snap => { if(snap.exists()) setPrices(p=>({...p, TANGKI: snap.data().price||350000})); }, ()=>{}));
       unsubs.push(onSnapshot(getDocPath('settings', 'kapal_config'), snap => { if(snap.exists()) setPrices(p=>({...p, KAPAL: snap.data().price||50000})); }, ()=>{}));
-      unsubs.push(onSnapshot(getDocPath('settings', 'gas_config'), snap => { if(snap.exists()) setPrices(p=>({...p, GAS: snap.data().price||150000})); }, ()=>{}));
+      unsubs.push(onSnapshot(getDocPath('settings', 'gas_config'), snap => { 
+        if(snap.exists() && snap.data().products) {
+          setGasProducts(snap.data().products);
+        }
+      }, ()=>{}));
     } catch(e){}
     return () => unsubs.forEach(u => u && u());
   }, []);
@@ -1035,11 +1228,21 @@ const AdminPanel = ({ onNavigateHome }) => {
     try { await setDoc(getDocPath('settings', confKey), { price: v, updatedBy: sessionUser.name, updatedAt: Date.now() }, { merge: true }); } catch(e){}
   };
 
+  const updateGasProductPrice = async (prodName, val) => {
+    if (!canManageCredentials) return;
+    const v = parseInt(val) || 0;
+    const updatedProducts = { ...gasProducts, [prodName]: v };
+    setGasProducts(updatedProducts);
+    try { 
+      await setDoc(getDocPath('settings', 'gas_config'), { products: updatedProducts, updatedBy: sessionUser.name, updatedAt: Date.now() }, { merge: true }); 
+    } catch(e){}
+  };
+
   const openAddCust = () => {
     setCustForm({
         name: '', address: '', whatsapp: '', username: '', password: '123456',
         companyName: '', agentName: '', customerType: 'PENGGUNA', resellerName: '',
-        customPrice: ''
+        customPrice: '', gasCustomPrices: {}
     });
     setEditingCust(null);
     setCustError('');
@@ -1058,7 +1261,8 @@ const AdminPanel = ({ onNavigateHome }) => {
         agentName: c.agentName || '',
         customerType: c.customerType || 'PENGGUNA',
         resellerName: c.resellerName || '',
-        customPrice: (c.price && c.price > 0) ? c.price : ''
+        customPrice: (c.price && c.price > 0) ? c.price : '',
+        gasCustomPrices: c.gasCustomPrices || {}
     });
     setEditingCust(c);
     setCustError('');
@@ -1084,9 +1288,20 @@ const AdminPanel = ({ onNavigateHome }) => {
         address: custForm.address.trim(),
         whatsapp: custForm.whatsapp.trim(),
         username: generatedUser,
-        price: Number(custForm.customPrice) || 0,
         updatedAt: Date.now()
     };
+
+    if (activeCustTab === 'GAS') {
+      const cleanGasPrices = {};
+      Object.entries(custForm.gasCustomPrices || {}).forEach(([k, v]) => {
+        const num = Number(v);
+        if (num > 0) cleanGasPrices[k] = num;
+      });
+      payload.gasCustomPrices = cleanGasPrices;
+      payload.price = 0; 
+    } else {
+      payload.price = Number(custForm.customPrice) || 0;
+    }
 
     if (!editingCust) {
         payload.id = `${conf.prefix}_${Date.now()}`;
@@ -1264,8 +1479,16 @@ const AdminPanel = ({ onNavigateHome }) => {
               custData.map(c => {
                 const nameKey = custConfigs[activeCustTab].nameField;
                 const isEnabled = c.portalAccessEnabled !== false;
-                const activeMasterPrice = prices[custConfigs[activeCustTab].priceKey] || 0;
-                const displayPrice = (c.price && Number(c.price) > 0) ? `Rp ${Number(c.price).toLocaleString('id-ID')} (Khusus)` : `Rp ${activeMasterPrice.toLocaleString('id-ID')} (Master)`;
+                const activeMasterPrice = activeCustTab === 'GAS' ? 150000 : (prices[custConfigs[activeCustTab].priceKey] || 0);
+                
+                let displayPriceText = "";
+                if (activeCustTab === 'GAS') {
+                  const hasCustom = c.gasCustomPrices && Object.keys(c.gasCustomPrices).length > 0;
+                  displayPriceText = hasCustom ? "Beberapa Kustom (Sisanya Master)" : "Full Ikut Master";
+                } else {
+                  displayPriceText = (c.price && Number(c.price) > 0) ? `Rp ${Number(c.price).toLocaleString('id-ID')} (Khusus)` : `Rp ${activeMasterPrice.toLocaleString('id-ID')} (Master)`;
+                }
+
                 return (
                   <div key={c.id} className="p-3 bg-emerald-50/50 border border-emerald-100 rounded-xl flex items-center justify-between text-xs gap-3 hover:bg-emerald-50 transition-all">
                     <div className="min-w-0 flex-1">
@@ -1278,7 +1501,7 @@ const AdminPanel = ({ onNavigateHome }) => {
                       {c.companyName && <p className="text-[10px] text-emerald-700 font-bold mt-0.5">PT: {c.companyName}</p>}
                       {c.agentName && <p className="text-[10px] text-emerald-700 font-bold mt-0.5">Agen: {c.agentName}</p>}
                       {c.customerType && <p className="text-[10px] text-emerald-700 font-bold mt-0.5">Tipe: {c.customerType} {c.resellerName && `- ${c.resellerName}`}</p>}
-                      <p className="text-[10px] text-emerald-600 font-mono mt-0.5">@{c.username} • Harga: {displayPrice}</p>
+                      <p className="text-[10px] text-emerald-600 font-mono mt-0.5">@{c.username} • Harga: {displayPriceText}</p>
                       {c.address && <p className="text-[10px] text-slate-500 truncate mt-0.5">{c.address} {c.whatsapp && `• WA: ${c.whatsapp}`}</p>}
                     </div>
                     {canManageCredentials && (
@@ -1303,7 +1526,7 @@ const AdminPanel = ({ onNavigateHome }) => {
       )}
 
       {activeCategory === 'PRICING' && (
-        <Card className="p-4 space-y-4 border-emerald-100">
+        <Card className="p-4 space-y-4 border-emerald-100 max-h-[75vh] overflow-y-auto">
           <h3 className="font-black text-sm border-b border-emerald-50 pb-2 text-emerald-900">Master Harga Standar</h3>
           <div className="space-y-3">
             {[
@@ -1311,13 +1534,31 @@ const AdminPanel = ({ onNavigateHome }) => {
               { id: 'GALLON', name: 'Air Gallon', conf: 'gallon_config' },
               { id: 'TANGKI', name: 'Mobil Tangki', conf: 'tangki_config' },
               { id: 'KAPAL', name: 'Air Kapal / Ton', conf: 'kapal_config' },
-              { id: 'GAS', name: 'Gas Industri', conf: 'gas_config' },
             ].map(div => (
               <div key={div.id} className="flex items-center justify-between p-3 border border-emerald-100 rounded-xl bg-emerald-50/50">
                 <span className="text-xs font-bold uppercase text-emerald-800">{div.name}</span>
-                <input type="number" value={prices[div.id]} onChange={e=>updatePrice(div.id, div.conf, e.target.value)} disabled={!canManageCredentials} className="w-32 p-2 border border-emerald-200 rounded-lg text-sm font-black text-right outline-none focus:ring-2 focus:ring-emerald-500 text-emerald-900" />
+                <input type="number" value={prices[div.id]} onChange={e=>updatePrice(div.id, div.conf, e.target.value)} onWheel={(e) => e.target.blur()} disabled={!canManageCredentials} className="w-32 p-2 border border-emerald-200 rounded-lg text-sm font-black text-right outline-none focus:ring-2 focus:ring-emerald-500 text-emerald-900" />
               </div>
             ))}
+
+            <div className="pt-2 border-t border-emerald-100">
+              <h4 className="text-xs font-black uppercase text-orange-800 mb-2">Master Harga Gas Industri</h4>
+              <div className="space-y-2">
+                {Object.entries(gasProducts).map(([prodName, prodPrice]) => (
+                  <div key={prodName} className="flex items-center justify-between p-2.5 border border-orange-100 rounded-xl bg-orange-50/30">
+                    <span className="text-xs font-bold text-orange-900">{prodName}</span>
+                    <input 
+                      type="number" 
+                      value={prodPrice} 
+                      onChange={e=>updateGasProductPrice(prodName, e.target.value)} 
+                      onWheel={(e) => e.target.blur()}
+                      disabled={!canManageCredentials} 
+                      className="w-32 p-2 border border-orange-200 rounded-lg text-sm font-black text-right outline-none focus:ring-2 focus:ring-orange-500 text-orange-900" 
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
           {!canManageCredentials && <p className="text-xs text-red-500 font-bold text-center">Hanya Administrator yang dapat mengubah harga.</p>}
         </Card>
@@ -1421,22 +1662,48 @@ const AdminPanel = ({ onNavigateHome }) => {
             </div>
           )}
 
-          <div>
-            <label className="text-[10px] font-bold uppercase text-slate-500">Alamat</label>
-            <input type="text" value={custForm.address} onChange={e=>setCustForm({...custForm, address: e.target.value})} placeholder="Alamat lengkap lokasi" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold" />
-          </div>
-          <div>
-            <label className="text-[10px] font-bold uppercase text-slate-500">No. WhatsApp (Wajib)</label>
-            <input type="text" value={custForm.whatsapp} onChange={e=>setCustForm({...custForm, whatsapp: e.target.value})} placeholder="08xxxxxxxxxx" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold" required />
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] font-bold uppercase text-slate-500">Alamat</label>
+              <input type="text" value={custForm.address} onChange={e=>setCustForm({...custForm, address: e.target.value})} placeholder="Alamat lengkap lokasi" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold" />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold uppercase text-slate-500">No. WhatsApp {activeCustTab === 'TANDON' ? '(Wajib)' : '(Opsional)'}</label>
+              <input type="text" value={custForm.whatsapp} onChange={e=>setCustForm({...custForm, whatsapp: e.target.value})} placeholder="08xxxxxxxxxx" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold" required={activeCustTab === 'TANDON'} />
+            </div>
           </div>
 
-          <div className="pt-2 border-t mt-2">
-            <label className="text-[10px] font-bold uppercase text-emerald-700 flex items-center justify-between">
-              Harga Khusus (Rp)
-              <span className="text-[9px] text-slate-400 normal-case font-normal">*Kosongkan untuk mengikuti Master Harga</span>
-            </label>
-            <input type="number" value={custForm.customPrice} onChange={e=>setCustForm({...custForm, customPrice: e.target.value})} placeholder={`Master: Rp ${(prices[currConf.priceKey]||0).toLocaleString('id-ID')}`} className="w-full p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-sm font-black text-emerald-900 placeholder:text-emerald-400/70 placeholder:font-medium" />
-          </div>
+          {activeCustTab === 'GAS' ? (
+            <div className="pt-2 border-t border-emerald-100 mt-2">
+              <label className="text-[10px] font-bold uppercase text-emerald-700 flex flex-col mb-2">
+                <span>Harga Khusus Per Produk (Rp)</span>
+                <span className="text-[9px] text-slate-400 normal-case font-normal">*Kosongkan kolom yang mengikuti Master Harga</span>
+              </label>
+              <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-1">
+                {Object.keys(gasProducts).map(prod => (
+                  <div key={prod} className="flex flex-col bg-emerald-50/50 p-1.5 rounded-lg border border-emerald-100">
+                    <span className="text-[9px] font-bold text-emerald-900 truncate mb-1">{prod}</span>
+                    <input
+                      type="number"
+                      value={custForm.gasCustomPrices[prod] || ''}
+                      onChange={e => setCustForm({...custForm, gasCustomPrices: {...custForm.gasCustomPrices, [prod]: e.target.value}})}
+                      onWheel={(e) => e.target.blur()}
+                      placeholder={(gasProducts[prod] || 0).toLocaleString('id-ID')}
+                      className="w-full p-1.5 bg-white border border-emerald-200 rounded text-xs font-black text-emerald-900 placeholder:text-emerald-300 placeholder:font-medium outline-none focus:ring-1 focus:ring-emerald-500"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="pt-2 border-t mt-2">
+              <label className="text-[10px] font-bold uppercase text-emerald-700 flex items-center justify-between">
+                Harga Khusus (Rp)
+                <span className="text-[9px] text-slate-400 normal-case font-normal">*Kosongkan untuk mengikuti Master Harga</span>
+              </label>
+              <input type="number" value={custForm.customPrice} onChange={e=>setCustForm({...custForm, customPrice: e.target.value})} onWheel={(e) => e.target.blur()} placeholder="Mengikuti Master Harga" className="w-full p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-sm font-black text-emerald-900 placeholder:text-emerald-400/70 placeholder:font-medium" />
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-2 pt-2 border-t">
             <div>
@@ -1561,7 +1828,7 @@ const MainApp = () => {
         {currentView === 'TANDON' && <SharedOperatorTemplate user={sessionUser} onNavigateHome={()=>setCurrentView('HOME')} title="Air Tandon" icon={Droplet} unitLabel="Tandon" textClass="text-blue-600" variantClass="border-blue-100" buttonVariant="primary" dbKeys={{entity: 'tandon_drivers', nameField: 'name', divType: 'TANDON', prefix: 'td', config: 'tandon_config'}} />}
         {currentView === 'GALLON' && <SharedOperatorTemplate user={sessionUser} onNavigateHome={()=>setCurrentView('HOME')} title="Air Gallon" icon={Package} unitLabel="Gallon" textClass="text-indigo-600" variantClass="border-indigo-100" buttonVariant="indigo" dbKeys={{entity: 'gallon_customers', nameField: 'name', divType: 'GALLON', prefix: 'gl', config: 'gallon_config'}} />}
         {currentView === 'MOBIL_TANGKI' && <SharedOperatorTemplate user={sessionUser} onNavigateHome={()=>setCurrentView('HOME')} title="Mobil Tangki" icon={Truck} unitLabel="Tangki" textClass="text-emerald-600" variantClass="border-emerald-100" buttonVariant="emerald" dbKeys={{entity: 'tangki_customers', nameField: 'name', divType: 'MOBIL_TANGKI', prefix: 'mt', config: 'tangki_config'}} />}
-        {currentView === 'AIR_KAPAL' && <SharedOperatorTemplate user={sessionUser} onNavigateHome={()=>setCurrentView('HOME')} title="Air Kapal" icon={Anchor} unitLabel="Ton" priceLabel="/ Ton" textClass="text-cyan-600" variantClass="border-cyan-100" buttonVariant="cyan" dbKeys={{entity: 'kapal_ships', nameField: 'shipName', divType: 'AIR_KAPAL', prefix: 'ak', config: 'kapal_config'}} />}
+        {currentView === 'AIR_KAPAL' && <SharedOperatorTemplate user={sessionUser} onNavigateHome={()=>setCurrentView('HOME')} title="Air Kapal" icon={Anchor} unitLabel="Ton" textClass="text-cyan-600" variantClass="border-cyan-100" buttonVariant="cyan" dbKeys={{entity: 'kapal_ships', nameField: 'shipName', divType: 'AIR_KAPAL', prefix: 'ak', config: 'kapal_config'}} />}
         {currentView === 'GAS_INDUSTRI' && <SharedOperatorTemplate user={sessionUser} onNavigateHome={()=>setCurrentView('HOME')} title="Gas Industri" icon={Flame} unitLabel="Tabung" textClass="text-orange-600" variantClass="border-orange-100" buttonVariant="orange" dbKeys={{entity: 'gas_customers', nameField: 'name', divType: 'GAS_INDUSTRI', prefix: 'gs', config: 'gas_config'}} />}
         {currentView === 'REPORTS' && <ReportsModule user={sessionUser} onNavigateHome={()=>setCurrentView('HOME')} />}
         {currentView === 'ADMIN' && <AdminPanel onNavigateHome={()=>setCurrentView('HOME')} />}
@@ -1570,7 +1837,7 @@ const MainApp = () => {
   );
 };
 
-export default function App() { 
+export default function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
