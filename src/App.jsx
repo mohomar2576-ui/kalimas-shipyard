@@ -2,12 +2,14 @@ import React, { useState, useEffect, createContext, useContext, useMemo } from '
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot, collection, updateDoc } from 'firebase/firestore';
+import { Analytics } from '@vercel/analytics/react'; // <-- Commented out for Gemini live preview
 import { 
   Users, Settings, Plus, X, LogOut, Droplet, Package, 
   Flame, ChevronRight, ArrowLeft, Truck,
   Share2, Anchor, Trash2, 
   PieChart, Key, Ban, Check, Edit
 } from 'lucide-react';
+
 //import { Analytics } from '@vercel/analytics/react';
 
 // Import the functions you need from the SDKs you need
@@ -26,6 +28,7 @@ const firebaseConfig = {
   appId: "1:330404051844:web:77e11003081143ff893bd1",
   measurementId: "G-TSSC1J1S0D"
 };
+
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -416,6 +419,62 @@ const DivisionSplitStatsCards = ({ todayVol, myTodayVol, todayRev, myTodayRev, u
   </div>
 );
 
+const PurchasePerformanceGraph = ({ txList = [] }) => {
+  const [viewMode, setViewMode] = useState('CUSTOMER'); // 'CUSTOMER' | 'OPERATOR'
+
+  const chartData = useMemo(() => {
+    const dataMap = {};
+    txList.forEach(t => {
+      const key = viewMode === 'CUSTOMER' ? (t.entityName || 'UMUM') : (t.operatorName || 'SISTEM');
+      if (!dataMap[key]) dataMap[key] = 0;
+      dataMap[key] += (t.quantity || 1);
+    });
+    
+    // Sort descending by volume and take top 6
+    const sorted = Object.entries(dataMap)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6);
+      
+    return sorted;
+  }, [txList, viewMode]);
+
+  const maxVal = chartData.length > 0 ? Math.max(...chartData.map(d => d.count), 5) : 5;
+
+  return (
+    <Card className="p-4 space-y-3 bg-white border-slate-200 shadow-sm">
+      <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+        <h3 className="font-extrabold text-xs uppercase text-slate-800 flex items-center gap-1.5">
+          <PieChart size={15} className="text-emerald-600" /> Performa ({viewMode === 'CUSTOMER' ? 'Top Pelanggan' : 'Top Operator'})
+        </h3>
+        <div className="flex bg-slate-100 p-0.5 rounded-lg text-[9px] font-bold">
+          <button onClick={() => setViewMode('CUSTOMER')} className={`px-2 py-1 rounded transition-colors ${viewMode === 'CUSTOMER' ? 'bg-white shadow-xs text-emerald-700' : 'text-slate-500'}`}>Pelanggan</button>
+          <button onClick={() => setViewMode('OPERATOR')} className={`px-2 py-1 rounded transition-colors ${viewMode === 'OPERATOR' ? 'bg-white shadow-xs text-emerald-700' : 'text-slate-500'}`}>Operator</button>
+        </div>
+      </div>
+      <div className="flex items-end justify-around gap-2 h-28 pt-4 pb-1 px-1 bg-slate-50 rounded-xl border border-slate-200 overflow-x-auto">
+        {chartData.length === 0 ? (
+          <div className="text-xs text-slate-400 m-auto italic">Belum ada data transaksi.</div>
+        ) : chartData.map((d, idx) => {
+          const heightPercent = maxVal > 0 ? Math.max(Math.round((d.count / maxVal) * 100), 6) : 6;
+          return (
+            <div key={idx} className="flex flex-col items-center gap-1 h-full justify-end flex-1 min-w-[30px] group cursor-default">
+              <span className="text-[9px] font-bold text-slate-500 opacity-0 group-hover:opacity-100 transition-all">{d.count}</span>
+              <div 
+                className={`w-full max-w-[28px] rounded-t transition-all ${d.count > 0 ? 'bg-emerald-500 group-hover:bg-emerald-600 shadow-xs' : 'bg-slate-200'}`} 
+                style={{ height: `${heightPercent}%` }}
+              ></div>
+              <span className="text-[8px] font-bold text-slate-600 text-center leading-tight truncate w-full px-1" title={d.name}>
+                {d.name.length > 8 ? d.name.slice(0,8) + '..' : d.name}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+};
+
 const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLabel = '', textClass, variantClass, buttonVariant, onNavigateHome }) => {
   const isReadOnly = user.role === 'MANAGEMENT';
   const canVoidAny = ['ADMIN', 'SUPER_ADMIN', 'SUPERVISOR'].includes(user.role);
@@ -455,6 +514,8 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
 
   const [customQtyRow, setCustomQtyRow] = useState(null);
   const [customQtyVal, setCustomQtyVal] = useState('');
+
+  const [lastTxToast, setLastTxToast] = useState(null);
 
   const todayStr = useMemo(() => getMakassarDateString(), []);
   const shiftActiveDateStr = shiftViewDate === 'TODAY' ? todayStr : getAdjacentDateString(todayStr, -1);
@@ -511,12 +572,27 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   const tabRev = displayActiveTxList.reduce((s, t) => s + (t.totalAmount || 0), 0);
   const myTabRev = displayMyTxList.reduce((s, t) => s + (t.totalAmount || 0), 0);
 
-  const filtered = entities.filter(e => {
-    const term = search.toLowerCase();
-    const nm = (e.name || e.shipName || '').toLowerCase();
-    const cp = (e.companyName || e.agentName || '').toLowerCase();
-    return nm.includes(term) || cp.includes(term);
-  });
+  const processedEntities = useMemo(() => {
+    return entities
+      .filter(e => {
+        const term = search.toLowerCase();
+        const nm = (e.name || e.shipName || '').toLowerCase();
+        const cp = (e.companyName || e.agentName || '').toLowerCase();
+        return nm.includes(term) || cp.includes(term);
+      })
+      .map(ent => {
+        const count = todayActiveTx.filter(t => t.entityId === ent.id).reduce((s,t) => s + (t.quantity||1), 0);
+        return { ...ent, todayCount: count };
+      })
+      .sort((a, b) => {
+        if (b.todayCount !== a.todayCount) {
+          return b.todayCount - a.todayCount;
+        }
+        const nameA = (a.name || a.shipName || '').toLowerCase();
+        const nameB = (b.name || b.shipName || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+      });
+  }, [entities, search, todayActiveTx]);
 
   const handleAddTx = async (entity, qty = 1) => {
     if (isReadOnly || !entity) return;
@@ -554,6 +630,11 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     setAllTx(updatedTxList);
     setLocalData('transactions', updatedTxList);
 
+    setLastTxToast({ id: txId, name: entity.name || entity.shipName, qty, amount: unitPrice * qty });
+    setTimeout(() => {
+      setLastTxToast(prev => prev?.id === txId ? null : prev);
+    }, 6000);
+
     try {
       await setDoc(getDocPath('transactions', txId), txPayload);
     } catch (err) {
@@ -567,6 +648,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     const updatedTxList = allTx.map(t => t.id === txId ? { ...t, status: 'VOIDED', voidedAt: Date.now(), voidedBy: user.name } : t);
     setAllTx(updatedTxList);
     setLocalData('transactions', updatedTxList);
+    setLastTxToast(null);
 
     try { 
       await updateDoc(getDocPath('transactions', txId), { status: 'VOIDED', voidedAt: Date.now(), voidedBy: user.name }); 
@@ -670,10 +752,25 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   const displayHeaderPrice = dbKeys.divType === 'GAS_INDUSTRI' ? 0 : (globalPrice > 0 ? globalPrice : (fallbackPrices[dbKeys.divType] || 20000));
 
   return (
-    <div className="max-w-md sm:max-w-xl mx-auto px-3 sm:px-4 py-4 pb-24 space-y-4">
+    <div className="max-w-md sm:max-w-xl mx-auto px-3 sm:px-4 py-4 pb-24 space-y-4 relative">
       <DivisionHeader title={title} icon={icon} price={displayHeaderPrice} priceLabel={priceLabel} colorClass={textClass} onNavigateHome={onNavigateHome} />
       
       <DivisionSplitStatsCards todayVol={todayVol} myTodayVol={myTodayVol} todayRev={todayRev} myTodayRev={myTodayRev} unitLabel={unitLabel} />
+
+      {lastTxToast && (
+        <div className="bg-slate-900 text-white p-3 rounded-2xl shadow-xl flex items-center justify-between text-xs animate-in slide-in-from-top-2 border border-slate-700 z-50 sticky top-16 shadow-emerald-500/10">
+          <div>
+            <p className="font-extrabold uppercase text-emerald-400 flex items-center gap-1"><Check size={14}/> Berhasil Input: {lastTxToast.name}</p>
+            <p className="text-[10px] text-slate-300 mt-0.5">{lastTxToast.qty} {unitLabel} • Rp {lastTxToast.amount.toLocaleString('id-ID')}</p>
+          </div>
+          <button 
+            onClick={() => handleUndo(lastTxToast.id)} 
+            className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-black text-[11px] rounded-xl cursor-pointer shadow-sm transition-all flex items-center gap-1"
+          >
+            <X size={12}/> Batalkan
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-1 bg-slate-200 p-1 rounded-2xl text-xs font-bold">
         <button onClick={() => setActiveTab('INPUT')} className={`py-2.5 rounded-xl transition-all ${activeTab==='INPUT'?`bg-white ${textClass} shadow-xs`:'text-slate-600'}`}>Input Penjualan</button>
@@ -685,10 +782,21 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
           <Card className={`p-4 space-y-3 ${variantClass}`}>
             <div className="flex justify-between items-center pb-2 border-b">
               <label className="text-xs font-bold text-slate-700 uppercase flex items-center gap-1"><Users size={14} className={textClass}/> Pilih {formLabel}</label>
-              {canAddEntity && <Button onClick={()=>{setIsAddOpen(true); setAddError('');}} variant={buttonVariant} className="py-1.5 px-3 text-[11px]"><Plus size={14} /> Baru</Button>}
+              {canAddEntity && (
+                <Button onClick={()=>{
+                  setNewName('');
+                  setNewCompany('');
+                  setNewCustType('PENGGUNA');
+                  setNewAddr('');
+                  setNewWa('');
+                  setAddError('');
+                  setIsAddOpen(true);
+                }} variant={buttonVariant} className="py-1.5 px-3 text-[11px]">
+                  <Plus size={14} /> Baru
+                </Button>
+              )}
             </div>
             
-            {/* Search Input with Quick Erase Button */}
             <div className="relative">
               <input 
                 type="text" 
@@ -701,17 +809,18 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                 <button 
                   type="button" 
                   onClick={() => setSearch('')} 
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 rounded-full cursor-pointer transition-colors"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 bg-slate-200 text-slate-500 hover:bg-slate-300 hover:text-slate-700 rounded-lg cursor-pointer transition-colors"
                   title="Hapus pencarian"
                 >
-                  <X size={15} />
+                  <X size={14} />
                 </button>
               )}
             </div>
 
             <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
-              {filtered.map(ent => {
-                const count = todayActiveTx.filter(t => t.entityId === ent.id).reduce((s,t) => s + (t.quantity||1), 0);
+              {processedEntities.map(ent => {
+                const count = ent.todayCount;
+                const isActiveToday = count > 0;
                 
                 if (dbKeys.divType === 'GAS_INDUSTRI') {
                   const currentGasProduct = customerGasSelections[ent.id] || Object.keys(gasMasterConfig)[0] || 'Oxygen, 6 m³';
@@ -726,19 +835,23 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                     displayItemPrice = gasMasterConfig[currentGasProduct] || 150000;
                   }
 
+                  const gasClasses = isActiveToday 
+                    ? "flex flex-col p-3.5 rounded-2xl border bg-white border-orange-300 shadow-md ring-1 ring-orange-50 gap-2.5 transition-all"
+                    : "flex flex-col p-3.5 rounded-2xl border bg-orange-50/40 border-orange-100 gap-2.5 hover:bg-orange-50/80 opacity-80 hover:opacity-100 transition-all shadow-sm";
+
                   return (
-                    <div key={ent.id} className="flex flex-col p-3.5 rounded-2xl border bg-white border-orange-200 gap-2.5 hover:bg-orange-50/50 transition-colors shadow-sm">
+                    <div key={ent.id} className={gasClasses}>
                       <div className="flex justify-between items-start">
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
                             <span className="text-xs font-black uppercase text-slate-900 truncate">{ent.name||ent.shipName}</span>
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 shrink-0">(Total: {count})</span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${isActiveToday ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>(Total: {count})</span>
                           </div>
                           {ent.companyName && <p className="text-[10px] text-slate-500 truncate mt-0.5">PT: {ent.companyName}</p>}
                           {ent.address && <p className="text-[10px] text-slate-500 truncate mt-0.5">{ent.address}</p>}
                         </div>
                       </div>
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between border-t border-orange-100 pt-2.5 mt-1 gap-2">
+                      <div className={`flex flex-col sm:flex-row sm:items-center justify-between border-t pt-2.5 mt-1 gap-2 ${isActiveToday ? 'border-orange-100' : 'border-orange-100/50'}`}>
                         <div className="flex flex-col gap-1 w-full sm:w-60">
                           <select
                             value={currentGasProduct}
@@ -776,12 +889,16 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                   displayItemPrice = globalPrice > 0 ? globalPrice : (fallbackPrices[dbKeys.divType] || 20000);
                 }
 
+                const nonGasClasses = isActiveToday
+                  ? "flex justify-between items-center p-3 rounded-xl border bg-white border-slate-300 shadow-md ring-1 ring-slate-100 gap-2 transition-all"
+                  : "flex justify-between items-center p-2.5 rounded-xl border bg-slate-50/70 border-slate-200 gap-2 hover:bg-slate-100 opacity-80 hover:opacity-100 transition-all";
+
                 return (
-                  <div key={ent.id} className="flex justify-between items-center p-2.5 rounded-xl border bg-slate-50 border-slate-200 gap-2 hover:bg-slate-100 transition-colors">
+                  <div key={ent.id} className={nonGasClasses}>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-black uppercase text-slate-900 truncate">{ent.name||ent.shipName}</span>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 shrink-0">(Total: {count})</span>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${isActiveToday ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}>(Total: {count})</span>
                       </div>
                       {ent.companyName && <p className="text-[10px] text-slate-500 truncate mt-0.5">PT: {ent.companyName}</p>}
                       {ent.agentName && <p className="text-[10px] text-slate-500 truncate mt-0.5">Agen: {ent.agentName}</p>}
@@ -794,6 +911,8 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
               })}
             </div>
           </Card>
+          
+          <PurchasePerformanceGraph txList={todayActiveTx} />
         </div>
       )}
 
@@ -830,6 +949,8 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
               ))}
             </div>
           </Card>
+
+          <PurchasePerformanceGraph txList={displayActiveTxList} />
         </div>
       )}
 
@@ -1133,6 +1254,8 @@ const ReportsModule = ({ user, onNavigateHome }) => {
           </div>
         )}
       </Card>
+      
+      <PurchasePerformanceGraph txList={activeTx} />
     </div>
   );
 };
@@ -1141,6 +1264,7 @@ const AdminPanel = ({ onNavigateHome }) => {
   const { sessionUser, allUsers, setAllUsers } = useContext(AuthContext);
   const [activeCategory, setActiveCategory] = useState('INTERNAL'); 
   const [activeCustTab, setActiveCustTab] = useState('TANDON');
+  const [searchCust, setSearchCust] = useState('');
   
   const canManageCredentials = ['ADMIN', 'SUPER_ADMIN'].includes(sessionUser.role);
   
@@ -1411,6 +1535,13 @@ const AdminPanel = ({ onNavigateHome }) => {
 
   const currConf = custConfigs[activeCustTab];
   const activeFormLabel = activeCustTab === 'TANDON' ? 'Nama Supir' : activeCustTab === 'KAPAL' ? 'Nama Kapal' : 'Nama Pembeli';
+  
+  const filteredCustData = custData.filter(c => {
+    const term = searchCust.toLowerCase();
+    const nm = (c[currConf.nameField] || '').toLowerCase();
+    const pt = (c.companyName || c.agentName || '').toLowerCase();
+    return nm.includes(term) || pt.includes(term);
+  });
 
   return (
     <div className="max-w-md sm:max-w-3xl mx-auto px-3 sm:px-4 py-4 pb-24 space-y-4">
@@ -1466,18 +1597,24 @@ const AdminPanel = ({ onNavigateHome }) => {
             <button onClick={()=>setActiveCustTab('GAS')} className={`px-3 py-1.5 rounded-lg whitespace-nowrap ${activeCustTab==='GAS'?'bg-emerald-600 text-white':'bg-emerald-50 text-emerald-700'}`}>Gas Industri</button>
           </div>
           
-          <div className="flex justify-between items-center">
-            <h3 className="font-black text-sm text-emerald-900">Daftar Akun: {activeCustTab}</h3>
-            {canManageCredentials && (
-              <Button onClick={openAddCust} variant="emerald" className="py-1.5 px-3 text-xs"><Plus size={14}/> Tambah Akun</Button>
-            )}
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+            <h3 className="font-black text-sm text-emerald-900 shrink-0">Daftar Akun: {activeCustTab}</h3>
+            <div className="flex gap-2 w-full sm:w-auto">
+              <div className="relative flex-1 sm:w-48">
+                <input type="text" value={searchCust} onChange={e=>setSearchCust(e.target.value)} placeholder="Cari..." className="w-full p-1.5 pr-8 bg-emerald-50 border border-emerald-100 rounded-lg text-xs font-bold uppercase outline-none focus:ring-2 focus:ring-emerald-500" />
+                {searchCust && <button onClick={()=>setSearchCust('')} className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 bg-emerald-200 text-emerald-600 hover:bg-emerald-300 rounded-md cursor-pointer"><X size={12}/></button>}
+              </div>
+              {canManageCredentials && (
+                <Button onClick={openAddCust} variant="emerald" className="py-1.5 px-3 text-xs shrink-0"><Plus size={14}/> Tambah Akun</Button>
+              )}
+            </div>
           </div>
           
           <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-            {custData.length === 0 ? (
+            {filteredCustData.length === 0 ? (
               <p className="text-xs text-emerald-600 text-center py-6 italic">Belum ada data akun.</p>
             ) : (
-              custData.map(c => {
+              filteredCustData.map(c => {
                 const nameKey = custConfigs[activeCustTab].nameField;
                 const isEnabled = c.portalAccessEnabled !== false;
                 const activeMasterPrice = activeCustTab === 'GAS' ? 150000 : (prices[custConfigs[activeCustTab].priceKey] || 0);
@@ -1843,6 +1980,7 @@ export default function App() {
     <ErrorBoundary>
       <AuthProvider>
         <MainApp />
+        {/* <Analytics /> */}
       </AuthProvider>
     </ErrorBoundary>
   );
