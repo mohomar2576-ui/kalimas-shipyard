@@ -8,7 +8,7 @@ import {
   Share2, Anchor, Trash2, 
   PieChart, Key, Ban, Check, Edit, Calendar, BarChart2
 } from 'lucide-react';
-import { Analytics } from '@vercel/analytics/react';
+ import { Analytics } from '@vercel/analytics/react';
 
 // Import the functions you need from the SDKs you need
 import { getAnalytics } from "firebase/analytics";
@@ -26,7 +26,6 @@ const firebaseConfig = {
   appId: "1:330404051844:web:77e11003081143ff893bd1",
   measurementId: "G-TSSC1J1S0D"
 };
-
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -667,7 +666,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     const raw = getLocalData(dbKeys.entity, []);
     return (Array.isArray(raw) ? raw : []).map(ent => ({
       ...ent,
-      price: (ent.price === '' || ent.price === null || ent.price === undefined) ? '' : ent.price
+      price: (ent.price === '' || ent.price === null || ent.price === undefined) ? undefined : ent.price
     }));
   });
   const [allTx, setAllTx] = useState(() => getLocalData('transactions', []));
@@ -714,7 +713,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
       unsubs.push(onSnapshot(getPublicPath(dbKeys.entity), snap => { 
         const l = snap.docs.map(d=>({id:d.id,...d.data()})); 
         if(Array.isArray(l) && l.length > 0) { 
-          const normalized = l.map(ent => ({ ...ent, price: (ent.price === '' || ent.price === null || ent.price === undefined) ? '' : ent.price }));
+          const normalized = l.map(ent => ({ ...ent, price: (ent.price === '' || ent.price === null || ent.price === undefined) ? undefined : ent.price }));
           setEntities(normalized); 
           setLocalData(dbKeys.entity, normalized); 
         } 
@@ -833,7 +832,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
       address: newAddr.trim(), 
       whatsapp: newWa.trim(),
       portalAccessEnabled: false, 
-      price: '',
+      price: undefined,
       gasCustomPrices: {}, 
       createdAt: Date.now()
     };
@@ -994,7 +993,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${isActiveToday ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}>(Total: {count})</span>
                       </div>
                       {ent.companyName && <p className="text-[10px] text-slate-500 truncate mt-0.5">PT: {ent.companyName}</p>}
-                      <p className="text-[10px] text-emerald-700 font-bold mt-0.5">Rp {displayItemPrice.toLocaleString('id-ID')} {hasCustomPrice ? (displayItemPrice===0 ? '(FOC)' : '(Khusus)') : '(Master)'}</p>
+                      <p className="text-[10px] text-emerald-700 font-bold mt-0.5">Rp {displayItemPrice.toLocaleString('id-ID')} {displayItemPrice === 0 ? '(FOC)' : (hasCustomPrice ? '(Khusus)' : '(Master)')}</p>
                     </div>
                     {!isReadOnly && <div className="flex items-center gap-1 shrink-0">{getAddButtons(ent)}</div>}
                   </div>
@@ -1422,12 +1421,12 @@ const AdminPanel = ({ onNavigateHome }) => {
     if (activeCategory !== 'CUSTOMER') return;
     const conf = custConfigs[activeCustTab];
     const initialLocal = getLocalData(conf.key, []);
-    setCustData(Array.isArray(initialLocal) ? initialLocal.map(c => ({...c, price: (c.price === '' || c.price === null || c.price === undefined) ? '' : c.price})) : []);
+    setCustData(Array.isArray(initialLocal) ? initialLocal.map(c => ({...c, price: (c.price === '' || c.price === null || c.price === undefined) ? undefined : c.price})) : []);
 
     const unsub = onSnapshot(getPublicPath(conf.key), snap => {
       const l = snap.docs.map(d=>({id:d.id,...d.data()}));
       if (Array.isArray(l)) { 
-        const normalized = l.map(c => ({...c, price: (c.price === '' || c.price === null || c.price === undefined) ? '' : c.price}));
+        const normalized = l.map(c => ({...c, price: (c.price === '' || c.price === null || c.price === undefined) ? undefined : c.price}));
         setCustData(normalized); 
         setLocalData(conf.key, normalized); 
       }
@@ -1507,10 +1506,10 @@ const AdminPanel = ({ onNavigateHome }) => {
         }
       });
       payload.gasCustomPrices = cleanGasPrices;
-      payload.price = ''; 
+      payload.price = undefined; 
     } else {
       const hasInputPrice = custForm.customPrice !== undefined && custForm.customPrice !== null && custForm.customPrice !== '' && !isNaN(Number(custForm.customPrice));
-      payload.price = hasInputPrice ? Number(custForm.customPrice) : '';
+      payload.price = hasInputPrice ? Number(custForm.customPrice) : undefined;
     }
 
     if (activeCustTab === 'TANGKI' || activeCustTab === 'GAS') payload.companyName = custForm.companyName.trim();
