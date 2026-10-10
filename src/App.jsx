@@ -2,13 +2,13 @@ import React, { useState, useEffect, createContext, useContext, useMemo } from '
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot, collection, updateDoc } from 'firebase/firestore';
-import { Analytics } from '@vercel/analytics/react'; // <-- Vercel Analytics (Commented for Gemini test)
 import { 
   Users, Settings, Plus, X, LogOut, Droplet, Package, 
   Flame, ChevronRight, ArrowLeft, Truck,
   Share2, Anchor, Trash2, 
   PieChart, Key, Ban, Check, Edit, Calendar, BarChart2
 } from 'lucide-react';
+import { Analytics } from '@vercel/analytics/react';
 
 // Import the functions you need from the SDKs you need
 import { getAnalytics } from "firebase/analytics";
@@ -89,12 +89,13 @@ const generateSecurePassword = (baseStr = 'user') => {
 };
 
 const getEffectivePrice = (customPrice, globalPrice) => {
+  const gp = Number(globalPrice) > 0 ? Number(globalPrice) : 20000;
   if (customPrice === 0 || customPrice === '0') return 0;
   if (customPrice === undefined || customPrice === null || customPrice === '' || String(customPrice).trim() === '') {
-    return Number(globalPrice) > 0 ? Number(globalPrice) : 20000;
+    return gp;
   }
   const parsed = Number(customPrice);
-  return isNaN(parsed) ? (Number(globalPrice) > 0 ? Number(globalPrice) : 20000) : parsed;
+  return isNaN(parsed) ? gp : parsed;
 };
 
 class ErrorBoundary extends React.Component {
@@ -662,7 +663,13 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   }), []);
 
   const [activeTab, setActiveTab] = useState('INPUT'); 
-  const [entities, setEntities] = useState(() => getLocalData(dbKeys.entity, []));
+  const [entities, setEntities] = useState(() => {
+    const raw = getLocalData(dbKeys.entity, []);
+    return (Array.isArray(raw) ? raw : []).map(ent => ({
+      ...ent,
+      price: (ent.price === '' || ent.price === null || ent.price === undefined) ? '' : ent.price
+    }));
+  });
   const [allTx, setAllTx] = useState(() => getLocalData('transactions', []));
   const [search, setSearch] = useState('');
   
@@ -706,7 +713,11 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
       
       unsubs.push(onSnapshot(getPublicPath(dbKeys.entity), snap => { 
         const l = snap.docs.map(d=>({id:d.id,...d.data()})); 
-        if(Array.isArray(l) && l.length > 0) { setEntities(l); setLocalData(dbKeys.entity, l); } 
+        if(Array.isArray(l) && l.length > 0) { 
+          const normalized = l.map(ent => ({ ...ent, price: (ent.price === '' || ent.price === null || ent.price === undefined) ? '' : ent.price }));
+          setEntities(normalized); 
+          setLocalData(dbKeys.entity, normalized); 
+        } 
       }, ()=>{}));
       
       unsubs.push(onSnapshot(getPublicPath('transactions'), snap => { 
@@ -1411,11 +1422,15 @@ const AdminPanel = ({ onNavigateHome }) => {
     if (activeCategory !== 'CUSTOMER') return;
     const conf = custConfigs[activeCustTab];
     const initialLocal = getLocalData(conf.key, []);
-    setCustData(Array.isArray(initialLocal) ? initialLocal : []);
+    setCustData(Array.isArray(initialLocal) ? initialLocal.map(c => ({...c, price: (c.price === '' || c.price === null || c.price === undefined) ? '' : c.price})) : []);
 
     const unsub = onSnapshot(getPublicPath(conf.key), snap => {
       const l = snap.docs.map(d=>({id:d.id,...d.data()}));
-      if (Array.isArray(l)) { setCustData(l); setLocalData(conf.key, l); }
+      if (Array.isArray(l)) { 
+        const normalized = l.map(c => ({...c, price: (c.price === '' || c.price === null || c.price === undefined) ? '' : c.price}));
+        setCustData(normalized); 
+        setLocalData(conf.key, normalized); 
+      }
     }, () => {});
     return () => unsub();
   }, [activeCategory, activeCustTab]);
