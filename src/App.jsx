@@ -27,6 +27,11 @@ const firebaseConfig = {
   appId: "1:330404051844:web:77e11003081143ff893bd1",
   measurementId: "G-TSSC1J1S0D"
 };
+const firebaseConfig = (() => {
+  try { return JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}'); } 
+  catch (e) { return {}; }
+})();
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -129,13 +134,24 @@ class ErrorBoundary extends React.Component {
 const GalanganKalimasLogo = ({ size = 'md', variant = 'color', className = '' }) => {
   const sizes = { sm: { h: 'h-8', t1: 'text-sm', t2: 'text-[8px]' }, md: { h: 'h-12', t1: 'text-lg', t2: 'text-[10px]' }, lg: { h: 'h-16', t1: 'text-2xl', t2: 'text-xs' } };
   const s = sizes[size] || sizes.md;
+  
+  const [imgSrc, setImgSrc] = useState('/GK Logo Only.png');
+
+  const handleError = () => {
+    // Smart cascading fallback to find the logo whether it's PNG, SVG, or in a subfolder
+    if (imgSrc === '/GK Logo Only.png') setImgSrc('/GK Logo Only.svg');
+    else if (imgSrc === '/GK Logo Only.svg') setImgSrc('public/GK Logo Only.png');
+    else if (imgSrc === 'public/GK Logo Only.png') setImgSrc('public/GK Logo Only.svg');
+    else setImgSrc('https://placehold.co/100x100/10b981/ffffff?text=GK');
+  };
+
   return (
     <div className={`flex items-center gap-2.5 select-none ${className}`}>
       <img 
-        src="public/GK Logo Only.png" 
+        src={imgSrc} 
         alt="Galangan Kalimas Logo" 
         className={`${s.h} w-auto object-contain shrink-0 drop-shadow-sm`} 
-        onError={(e) => { e.target.onerror = null; e.target.src = "https://placehold.co/100x100/10b981/ffffff?text=GK"; }}
+        onError={handleError}
       />
       <div className="flex flex-col leading-none justify-center">
         <span className={`font-black tracking-wider uppercase font-sans ${s.t1} ${variant==='light'?'text-white':'text-slate-900'}`}>KALIMAS</span>
