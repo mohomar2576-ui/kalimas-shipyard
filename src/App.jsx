@@ -2,15 +2,13 @@ import React, { useState, useEffect, createContext, useContext, useMemo } from '
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot, collection, updateDoc } from 'firebase/firestore';
-// import { Analytics } from '@vercel/analytics/react'; // <-- Vercel Analytics (Commented for Gemini test)
+import { Analytics } from '@vercel/analytics/react'; // <-- Vercel Analytics (Commented for Gemini test)
 import { 
   Users, Settings, Plus, X, LogOut, Droplet, Package, 
   Flame, ChevronRight, ArrowLeft, Truck,
   Share2, Anchor, Trash2, 
   PieChart, Key, Ban, Check, Edit, Calendar, BarChart2
 } from 'lucide-react';
-
-import { Analytics } from '@vercel/analytics/react';
 
 // Import the functions you need from the SDKs you need
 import { getAnalytics } from "firebase/analytics";
@@ -792,14 +790,15 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     if (dbKeys.divType === 'GAS_INDUSTRI') {
       activeGasProd = customerGasSelections[entity.id] || Object.keys(gasMasterConfig)[0] || 'Oxygen, 6 m³';
       const customGas = entity.gasCustomPrices?.[activeGasProd];
-      if (customGas !== undefined && customGas !== null && customGas !== '') {
+      if (customGas !== undefined && customGas !== null && customGas !== '' && !isNaN(Number(customGas))) {
         unitPrice = Number(customGas);
       } else {
         unitPrice = gasMasterConfig[activeGasProd] || 150000;
       }
     } else {
       const entPrice = entity.price;
-      if (entPrice !== undefined && entPrice !== null && entPrice !== '') {
+      const hasValidCustomPrice = entPrice !== undefined && entPrice !== null && entPrice !== '' && !isNaN(Number(entPrice));
+      if (hasValidCustomPrice) {
         unitPrice = Number(entPrice);
       } else {
         unitPrice = globalPrice > 0 ? globalPrice : (globalPrice === 0 ? 0 : 20000);
@@ -967,7 +966,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                 if (dbKeys.divType === 'GAS_INDUSTRI') {
                   const currentGasProduct = customerGasSelections[ent.id] || Object.keys(gasMasterConfig)[0] || 'Oxygen, 6 m³';
                   const customGasVal = ent.gasCustomPrices?.[currentGasProduct];
-                  const hasCustomGas = customGasVal !== undefined && customGasVal !== null && customGasVal !== '';
+                  const hasCustomGas = customGasVal !== undefined && customGasVal !== null && customGasVal !== '' && !isNaN(Number(customGasVal));
                   const displayItemPrice = hasCustomGas ? Number(customGasVal) : (gasMasterConfig[currentGasProduct] || 150000);
                   const gasClasses = isActiveToday 
                     ? "flex flex-col p-3.5 rounded-2xl border bg-white border-orange-300 shadow-md ring-1 ring-orange-50 gap-2.5 transition-all"
@@ -989,7 +988,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                           <select value={currentGasProduct} onChange={e => setCustomerGasSelections({...customerGasSelections, [ent.id]: e.target.value})} className="w-full p-2 bg-orange-50 border border-orange-200 rounded-xl text-[11px] font-black text-orange-950 outline-none focus:ring-2 focus:ring-orange-400 shadow-inner cursor-pointer">
                             {Object.keys(gasMasterConfig).map(gpName => {
                               const cGas = ent.gasCustomPrices?.[gpName];
-                              const isCust = cGas !== undefined && cGas !== null && cGas !== '';
+                              const isCust = cGas !== undefined && cGas !== null && cGas !== '' && !isNaN(Number(cGas));
                               const price = isCust ? Number(cGas) : (gasMasterConfig[gpName] || 0);
                               return <option key={gpName} value={gpName}>{gpName} - Rp {price.toLocaleString('id-ID')} {isCust ? '(Khusus)' : ''}</option>
                             })}
@@ -1003,7 +1002,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                 }
 
                 const entPrice = ent.price;
-                const hasCustomPrice = entPrice !== undefined && entPrice !== null && entPrice !== '';
+                const hasCustomPrice = entPrice !== undefined && entPrice !== null && entPrice !== '' && !isNaN(Number(entPrice));
                 const displayItemPrice = hasCustomPrice ? Number(entPrice) : (globalPrice > 0 ? globalPrice : (globalPrice === 0 ? 0 : 20000));
                 const nonGasClasses = isActiveToday
                   ? "flex justify-between items-center p-3 rounded-xl border bg-white border-slate-300 shadow-md ring-1 ring-slate-100 gap-2 transition-all"
@@ -1488,7 +1487,8 @@ const AdminPanel = ({ onNavigateHome }) => {
   const openEditCust = (c) => {
     const nameKey = custConfigs[activeCustTab].nameField;
     const rawPrice = c.price;
-    const customPriceInput = (rawPrice !== undefined && rawPrice !== null && rawPrice !== '') ? rawPrice : '';
+    const hasValidPrice = rawPrice !== undefined && rawPrice !== null && rawPrice !== '' && !isNaN(Number(rawPrice));
+    const customPriceInput = hasValidPrice ? rawPrice : '';
     setCustForm({
         name: c[nameKey] || '', address: c.address || '', whatsapp: c.whatsapp || '', username: c.username || '',
         companyName: c.companyName || '', agentName: c.agentName || '', customerType: c.customerType || 'PENGGUNA',
@@ -1520,14 +1520,15 @@ const AdminPanel = ({ onNavigateHome }) => {
     if (activeCustTab === 'GAS') {
       const cleanGasPrices = {};
       Object.entries(custForm.gasCustomPrices || {}).forEach(([k, v]) => { 
-        if (v !== undefined && v !== null && v !== '') {
+        if (v !== undefined && v !== null && v !== '' && !isNaN(Number(v))) {
           cleanGasPrices[k] = Number(v);
         }
       });
       payload.gasCustomPrices = cleanGasPrices;
       payload.price = ''; 
     } else {
-      payload.price = (custForm.customPrice !== undefined && custForm.customPrice !== null && custForm.customPrice !== '') ? Number(custForm.customPrice) : '';
+      const hasInputPrice = custForm.customPrice !== undefined && custForm.customPrice !== null && custForm.customPrice !== '' && !isNaN(Number(custForm.customPrice));
+      payload.price = hasInputPrice ? Number(custForm.customPrice) : '';
     }
 
     if (activeCustTab === 'TANGKI' || activeCustTab === 'GAS') payload.companyName = custForm.companyName.trim();
@@ -1757,7 +1758,7 @@ const AdminPanel = ({ onNavigateHome }) => {
                   displayPriceText = hasCustom ? "Beberapa Kustom (Sisanya Master)" : "Full Ikut Master";
                 } else {
                   const rawP = c.price;
-                  const hasCustP = rawP !== undefined && rawP !== null && rawP !== '';
+                  const hasCustP = rawP !== undefined && rawP !== null && rawP !== '' && !isNaN(Number(rawP));
                   const numericP = Number(rawP);
                   displayPriceText = hasCustP ? `Rp ${numericP.toLocaleString('id-ID')} ${numericP === 0 ? '(FOC)' : '(Khusus)'}` : `Rp ${activeMasterPrice.toLocaleString('id-ID')} (Master)`;
                 }
