@@ -2,15 +2,15 @@ import React, { useState, useEffect, createContext, useContext, useMemo } from '
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot, collection, updateDoc } from 'firebase/firestore';
-import { Analytics } from '@vercel/analytics/react'; // <-- Commented out for Gemini live preview
+// import { Analytics } from '@vercel/analytics/react'; // <-- Vercel Analytics (Commented for Gemini test)
 import { 
   Users, Settings, Plus, X, LogOut, Droplet, Package, 
   Flame, ChevronRight, ArrowLeft, Truck,
   Share2, Anchor, Trash2, 
-  PieChart, Key, Ban, Check, Edit
+  PieChart, Key, Ban, Check, Edit, Calendar, BarChart2
 } from 'lucide-react';
 
-//import { Analytics } from '@vercel/analytics/react';
+import { Analytics } from '@vercel/analytics/react';
 
 // Import the functions you need from the SDKs you need
 import { getAnalytics } from "firebase/analytics";
@@ -52,6 +52,7 @@ const getMakassarDateString = (date = new Date()) => {
 
 const getAdjacentDateString = (dateStr = getMakassarDateString(), offset = 0) => {
   try {
+    if (!dateStr) dateStr = getMakassarDateString();
     const parts = dateStr.split('-').map(Number);
     const d = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2] + offset));
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
@@ -80,6 +81,14 @@ const getLocalData = (key, fallback) => {
 
 const setLocalData = (key, value) => {
   try { localStorage.setItem(`kalimas_${key}`, JSON.stringify(value)); } catch (e) {}
+};
+
+const generateSecurePassword = (baseStr = 'user') => {
+  const cleanBase = baseStr.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+  const chars = '!@#$%&*';
+  const special = chars[Math.floor(Math.random() * chars.length)];
+  const nums = String(Math.floor(Math.random() * 900 + 100));
+  return `${cleanBase || 'user'}${special}${nums}`;
 };
 
 class ErrorBoundary extends React.Component {
@@ -119,10 +128,7 @@ const GalanganKalimasLogo = ({ size = 'md', variant = 'color', className = '' })
         src="GK Logo Only.svg" 
         alt="Galangan Kalimas Logo" 
         className={`${s.h} w-auto object-contain shrink-0 drop-shadow-sm`} 
-        onError={(e) => {
-          e.target.onerror = null; 
-          e.target.src = "GK Logo Only.png"; 
-        }}
+        onError={(e) => { e.target.onerror = null; e.target.src = "GK Logo Only.png"; }}
       />
       <div className="flex flex-col leading-none justify-center">
         <span className={`font-black tracking-wider uppercase font-sans ${s.t1} ${variant==='light'?'text-white':'text-slate-900'}`}>KALIMAS</span>
@@ -205,7 +211,7 @@ const AuthProvider = ({ children }) => {
               setSystemInitialized(true); 
               setLocalData('sys_init', true);
               
-              if (sessionUser) {
+              if (sessionUser && !['DRIVER', 'CUSTOMER_TANGKI', 'CUSTOMER_GALLON', 'CUSTOMER_KAPAL', 'CUSTOMER_GAS'].includes(sessionUser.role)) {
                 const updatedUser = list.find(u => u.id === sessionUser.id);
                 if (updatedUser) {
                   const isSuperOrMgmt = ['SUPER_ADMIN', 'MANAGEMENT'].includes(updatedUser.role);
@@ -226,9 +232,7 @@ const AuthProvider = ({ children }) => {
       }
     });
 
-    const handleFocus = () => {
-      try { auth.currentUser || signInAnonymously(auth); } catch (e) {}
-    };
+    const handleFocus = () => { try { auth.currentUser || signInAnonymously(auth); } catch (e) {} };
     window.addEventListener('focus', handleFocus);
 
     return () => { 
@@ -257,7 +261,7 @@ const AuthProvider = ({ children }) => {
       const list = getLocalData(listKey, []);
       const match = list.find(c => c.username?.toLowerCase() === cleanUsername && (c.password||'123456') === password);
       if (match) {
-        if (match.portalAccessEnabled === false) return { found: true, active: false };
+        if (match.portalAccessEnabled !== true) return { found: true, active: false };
         const u = { ...match, name: match[nameField] || match.name, role: roleName, divisions: [divisionName] };
         return { found: true, active: true, user: u };
       }
@@ -269,28 +273,24 @@ const AuthProvider = ({ children }) => {
       if (!drvCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan oleh Administrator.' };
       setSessionUser(drvCheck.user); setLocalData('session_user', drvCheck.user); return { success: true };
     }
-
     const tcCheck = checkPortal('tangki_customers', 'MOBIL_TANGKI', 'CUSTOMER_TANGKI', 'name');
     if (tcCheck.found) {
-      if (!tcCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan oleh Administrator.' };
+      if (!tcCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' };
       setSessionUser(tcCheck.user); setLocalData('session_user', tcCheck.user); return { success: true };
     }
-
     const gcCheck = checkPortal('gallon_customers', 'GALLON', 'CUSTOMER_GALLON', 'name');
     if (gcCheck.found) {
-      if (!gcCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan oleh Administrator.' };
+      if (!gcCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' };
       setSessionUser(gcCheck.user); setLocalData('session_user', gcCheck.user); return { success: true };
     }
-
     const shCheck = checkPortal('kapal_ships', 'AIR_KAPAL', 'CUSTOMER_KAPAL', 'shipName');
     if (shCheck.found) {
-      if (!shCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan oleh Administrator.' };
+      if (!shCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' };
       setSessionUser(shCheck.user); setLocalData('session_user', shCheck.user); return { success: true };
     }
-
     const gsCheck = checkPortal('gas_customers', 'GAS_INDUSTRI', 'CUSTOMER_GAS', 'name');
     if (gsCheck.found) {
-      if (!gsCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan oleh Administrator.' };
+      if (!gsCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' };
       setSessionUser(gsCheck.user); setLocalData('session_user', gsCheck.user); return { success: true };
     }
 
@@ -316,32 +316,17 @@ const SystemInitScreen = () => {
     
     try { 
       await setDoc(getDocPath('users', admin.id), admin); 
-      
       const defaultConfigs = [
         { key: 'tandon_config', price: 20000 },
         { key: 'gallon_config', price: 6000 },
         { key: 'tangki_config', price: 350000 },
         { key: 'kapal_config', price: 50000 },
         { key: 'gas_config', products: {
-          'Oxygen, 6 m³': 150000,
-          'Acetylene': 550000,
-          'Argon, 6 m³': 550000,
-          'Nitrogen, 6 m³': 400000,
-          'CO₂, 25 kg': 550000,
-          'LPG, 50 kg': 1500000,
-          'LPG, 12 kg': 275000,
-          'Oxygen Medis, 2 m³': 100000,
-          'Oxygen Medis, 6 m³': 150000
+          'Oxygen, 6 m³': 150000, 'Acetylene': 550000, 'Argon, 6 m³': 550000, 'Nitrogen, 6 m³': 400000,
+          'CO₂, 25 kg': 550000, 'LPG, 50 kg': 1500000, 'LPG, 12 kg': 275000, 'Oxygen Medis, 2 m³': 100000, 'Oxygen Medis, 6 m³': 150000
         }}
       ];
-      
-      await Promise.all(defaultConfigs.map(conf => 
-        setDoc(getDocPath('settings', conf.key), { 
-          ...conf,
-          updatedBy: 'SYSTEM_INIT', 
-          updatedAt: Date.now() 
-        }).catch(()=>{})
-      ));
+      await Promise.all(defaultConfigs.map(conf => setDoc(getDocPath('settings', conf.key), { ...conf, updatedBy: 'SYSTEM_INIT', updatedAt: Date.now() }).catch(()=>{})));
     } catch(err){}
   };
 
@@ -375,14 +360,230 @@ const LoginScreen = () => {
     <div className="min-h-screen bg-emerald-900 flex items-center justify-center p-4">
       <div className="max-w-md w-full bg-white rounded-3xl p-8 space-y-5 shadow-2xl border-4 border-emerald-800">
         <GalanganKalimasLogo size="lg" className="justify-center mb-4" />
-        <h2 className="text-xl font-black text-center uppercase tracking-tight text-emerald-900">Login Point-of-Sales (POS)</h2>
+        <h2 className="text-xl font-black text-center uppercase tracking-tight text-emerald-900">Login POS</h2>
         {err && <div className="p-3 bg-red-50 text-red-700 rounded-xl text-xs font-bold border border-red-100">{err}</div>}
         <form onSubmit={handleLogin} className="space-y-4">
           <input type="text" value={user} onChange={e=>setUser(e.target.value)} placeholder="Username" className="w-full p-3.5 bg-slate-50 border rounded-xl text-sm lowercase" required />
           <input type="password" value={pwd} onChange={e=>setPwd(e.target.value)} placeholder="Password" className="w-full p-3.5 bg-slate-50 border rounded-xl text-sm" required />
-          <Button type="submit" variant="emerald" className="w-full py-4 text-sm shadow-lg">Masuk POS</Button>
+          <Button type="submit" variant="emerald" className="w-full py-4 text-sm shadow-lg">Masuk</Button>
         </form>
       </div>
+    </div>
+  );
+};
+
+const CustomerPortal = ({ user, logout }) => {
+  const getTheme = (role) => {
+    switch(role) {
+      case 'DRIVER': return { label: 'Tandon', bg: 'bg-blue-600', txt: 'text-blue-700', light: 'bg-blue-50', border: 'border-blue-200' };
+      case 'CUSTOMER_TANGKI': return { label: 'Tangki', bg: 'bg-emerald-600', txt: 'text-emerald-700', light: 'bg-emerald-50', border: 'border-emerald-200' };
+      case 'CUSTOMER_GALLON': return { label: 'Gallon', bg: 'bg-indigo-600', txt: 'text-indigo-700', light: 'bg-indigo-50', border: 'border-indigo-200' };
+      case 'CUSTOMER_KAPAL': return { label: 'Ton', bg: 'bg-cyan-600', txt: 'text-cyan-700', light: 'bg-cyan-50', border: 'border-cyan-200' };
+      case 'CUSTOMER_GAS': return { label: 'Tabung', bg: 'bg-orange-600', txt: 'text-orange-700', light: 'bg-orange-50', border: 'border-orange-200' };
+      default: return { label: 'Unit', bg: 'bg-slate-600', txt: 'text-slate-700', light: 'bg-slate-50', border: 'border-slate-200' };
+    }
+  };
+
+  const theme = getTheme(user.role);
+  const [allTx, setAllTx] = useState(() => getLocalData('transactions', []));
+  const [selectedDate, setSelectedDate] = useState(() => getMakassarDateString());
+  const [selectedGraphDate, setSelectedGraphDate] = useState(() => getMakassarDateString());
+  const [graphView, setGraphView] = useState('MONTH'); 
+  const [zoomedDate, setZoomedDate] = useState(null);
+
+  useEffect(() => { 
+    if (selectedDate) setSelectedGraphDate(selectedDate); 
+  }, [selectedDate]);
+
+  useEffect(() => {
+    let unsub;
+    try {
+      unsub = onSnapshot(getPublicPath('transactions'), snap => { 
+        const l = snap.docs.map(d=>({id:d.id,...d.data()})); 
+        if(Array.isArray(l)) { setAllTx(l); setLocalData('transactions', l); } 
+      }, ()=>{});
+    } catch(e){}
+    return () => { if(unsub) unsub(); };
+  }, []);
+
+  const safeDateStr = selectedDate || getMakassarDateString();
+  const myTx = (Array.isArray(allTx) ? allTx : []).filter(t => t.entityId === user.id && t.status !== 'VOIDED');
+  
+  const dateParts = useMemo(() => {
+    try {
+      const parts = safeDateStr.split('-').map(Number);
+      if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+        return parts;
+      }
+    } catch(e){}
+    const fallbackParts = getMakassarDateString().split('-').map(Number);
+    return fallbackParts;
+  }, [safeDateStr]);
+
+  const currentDateObj = useMemo(() => {
+    return new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
+  }, [dateParts]);
+  
+  const dayOfWeek = currentDateObj.getDay() || 7;
+  const monday = useMemo(() => {
+    const d = new Date(currentDateObj);
+    d.setDate(currentDateObj.getDate() - dayOfWeek + 1);
+    return d;
+  }, [currentDateObj, dayOfWeek]);
+
+  const sunday = useMemo(() => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + 6);
+    return d;
+  }, [monday]);
+  
+  const formatD = (dObj) => `${dObj.getFullYear()}-${String(dObj.getMonth() + 1).padStart(2, '0')}-${String(dObj.getDate()).padStart(2, '0')}`;
+  const startOfWeek = formatD(monday);
+  const endOfWeek = formatD(sunday);
+  const monthPrefix = `${dateParts[0]}-${String(dateParts[1]).padStart(2, '0')}`;
+
+  const dailyTx = myTx.filter(t => t.dateStr === safeDateStr);
+  const weeklyTx = myTx.filter(t => t.dateStr >= startOfWeek && t.dateStr <= endOfWeek);
+  const monthlyTx = myTx.filter(t => t.dateStr.startsWith(monthPrefix));
+  const selectedGraphTx = myTx.filter(t => t.dateStr === (selectedGraphDate || safeDateStr));
+
+  const dailyVol = dailyTx.reduce((s, t) => s + (t.quantity || 1), 0);
+  const weeklyVol = weeklyTx.reduce((s, t) => s + (t.quantity || 1), 0);
+  const monthlyVol = monthlyTx.reduce((s, t) => s + (t.quantity || 1), 0);
+
+  const weeklyData = useMemo(() => {
+    return ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'].map((name, i) => {
+      const td = new Date(monday); td.setDate(monday.getDate() + i);
+      const ds = formatD(td);
+      const dayTx = myTx.filter(t => t.dateStr === ds);
+      return { name, ds, vol: dayTx.reduce((s, t) => s + (t.quantity || 1), 0) };
+    });
+  }, [monday, myTx]);
+
+  const monthData = useMemo(() => {
+    try {
+      const daysInMonth = new Date(dateParts[0], dateParts[1], 0).getDate();
+      let res = [];
+      for (let i = 1; i <= daysInMonth; i++) {
+        const ds = `${dateParts[0]}-${String(dateParts[1]).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
+        const dayTx = myTx.filter(t => t.dateStr === ds);
+        res.push({ day: i, ds, vol: dayTx.reduce((s, t) => s + (t.quantity || 1), 0) });
+      }
+      return res;
+    } catch(e) { return []; }
+  }, [dateParts, myTx]);
+
+  const maxGraphVol = useMemo(() => {
+    const list = graphView === 'WEEK' ? weeklyData : monthData;
+    if (!Array.isArray(list) || list.length === 0) return 5;
+    const max = Math.max(...list.map(d => d.vol || 0), 5);
+    return isNaN(max) ? 5 : max;
+  }, [graphView, weeklyData, monthData]);
+
+  return (
+    <div className="min-h-screen bg-slate-100 font-sans">
+      <header className={`px-4 py-4 ${theme.bg} text-white shadow-md flex justify-between items-center`}>
+        <div>
+          <span className="text-[10px] font-bold text-white/80 uppercase tracking-widest">Portal Pelanggan</span>
+          <h1 className="font-black text-lg flex items-center gap-2">{user.name}</h1>
+        </div>
+        <button onClick={logout} className="p-2 bg-black/20 hover:bg-black/30 rounded-xl transition-all cursor-pointer"><LogOut size={18}/></button>
+      </header>
+
+      <main className="max-w-md sm:max-w-xl mx-auto p-4 space-y-4 pb-20">
+        <Card className="p-4 space-y-4">
+          <div className="flex flex-col gap-1.5 pb-3 border-b border-slate-100">
+            <label className="text-xs font-extrabold text-slate-700 uppercase flex items-center gap-1.5"><Calendar size={14} className={theme.txt}/> Pilih Tanggal (Acuan Ringkasan)</label>
+            <input type="date" value={safeDateStr} onChange={e=>setSelectedDate(e.target.value || getMakassarDateString())} className="p-2.5 w-full bg-slate-50 border border-slate-200 rounded-xl text-sm font-black outline-none focus:ring-2 focus:ring-emerald-500 shadow-inner" />
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+             <div className={`p-2 rounded-xl text-center border shadow-sm ${theme.light} ${theme.border}`}>
+                <p className="text-[9px] text-slate-500 uppercase font-bold mb-1 truncate">Hari Ini ({safeDateStr})</p>
+                <p className={`text-sm font-black ${theme.txt}`}>{dailyVol} <span className="text-[9px] font-medium">{theme.label}</span></p>
+             </div>
+             <div className={`p-2 rounded-xl text-center border shadow-sm ${theme.light} ${theme.border}`}>
+                <p className="text-[9px] text-slate-500 uppercase font-bold mb-1 truncate">Pekan ({startOfWeek.slice(5)} - {endOfWeek.slice(5)})</p>
+                <p className={`text-sm font-black ${theme.txt}`}>{weeklyVol} <span className="text-[9px] font-medium">{theme.label}</span></p>
+             </div>
+             <div className={`p-2 rounded-xl text-center border shadow-sm ${theme.light} ${theme.border}`}>
+                <p className="text-[9px] text-slate-500 uppercase font-bold mb-1 truncate">Bulan ({monthPrefix})</p>
+                <p className={`text-sm font-black ${theme.txt}`}>{monthlyVol} <span className="text-[9px] font-medium">{theme.label}</span></p>
+             </div>
+          </div>
+        </Card>
+
+        <Card className="p-4 space-y-3">
+          <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+            <h3 className="font-extrabold text-xs uppercase flex items-center gap-1.5 text-slate-800"><BarChart2 size={15} className={theme.txt}/> Grafik Volume</h3>
+            <div className="flex bg-slate-100 p-0.5 rounded-lg text-[9px] font-bold">
+              <button onClick={() => setGraphView('WEEK')} className={`px-2 py-1.5 rounded transition-colors cursor-pointer ${graphView === 'WEEK' ? 'bg-white shadow-xs text-slate-800' : 'text-slate-500'}`}>Mingguan</button>
+              <button onClick={() => setGraphView('MONTH')} className={`px-2 py-1.5 rounded transition-colors cursor-pointer ${graphView === 'MONTH' ? 'bg-white shadow-xs text-slate-800' : 'text-slate-500'}`}>Bulanan</button>
+            </div>
+          </div>
+          
+          <div className="pt-6 pb-3 px-1 bg-slate-50 rounded-xl border border-slate-200">
+            {graphView === 'MONTH' ? (
+              <div className="flex w-full h-32 items-end justify-between px-1">
+                {monthData.map(m => {
+                  const hp = maxGraphVol > 0 ? Math.max((m.vol/maxGraphVol)*100, 3) : 3;
+                  const isSel = (selectedGraphDate || safeDateStr) === m.ds;
+                  const isZoomed = zoomedDate === m.ds;
+                  return (
+                    <div 
+                      key={m.day} 
+                      className="relative flex-1 h-full mx-[1px] flex flex-col justify-end items-center touch-none group cursor-pointer"
+                      onPointerDown={() => { setZoomedDate(m.ds); setSelectedGraphDate(m.ds); }}
+                      onPointerUp={() => setZoomedDate(null)}
+                      onPointerLeave={() => setZoomedDate(null)}
+                      onPointerCancel={() => setZoomedDate(null)}
+                    >
+                      {(isSel || isZoomed) && (
+                        <span className={`absolute -top-5 text-[10px] font-black z-30 ${theme.txt}`}>{m.vol}</span>
+                      )}
+                      <div className={`w-full rounded-t-sm transition-transform duration-200 origin-bottom ${isZoomed ? 'scale-[2.5] z-20 shadow-md' : (isSel ? 'scale-[1.3] z-10 opacity-100 shadow-sm' : 'opacity-40 group-hover:opacity-70')} ${theme.bg}`} style={{height:`${hp}%`}}></div>
+                      {isZoomed && <span className="absolute -bottom-5 text-[9px] font-bold text-slate-700 bg-white px-1 shadow-sm rounded z-30">{m.day}</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex w-full h-32 items-end justify-around px-2 gap-1">
+                {weeklyData.map(w => {
+                  const hp = maxGraphVol > 0 ? Math.max((w.vol/maxGraphVol)*100, 4) : 4;
+                  const isSel = (selectedGraphDate || safeDateStr) === w.ds;
+                  return (
+                    <div key={w.ds} onClick={() => setSelectedGraphDate(w.ds)} className="relative flex-1 max-w-[40px] h-full flex flex-col justify-end items-center cursor-pointer group">
+                      <span className={`text-[10px] font-black mb-1 transition-all ${isSel ? theme.txt : 'text-slate-400 opacity-0 group-hover:opacity-100'}`}>{w.vol}</span>
+                      <div className={`w-full rounded-t-lg transition-all ${isSel ? `opacity-100 shadow-md ${theme.bg}` : `opacity-40 group-hover:opacity-70 ${theme.bg}`}`} style={{height:`${hp}%`}}></div>
+                      <span className={`text-[9px] font-bold mt-1 ${isSel ? 'text-slate-900' : 'text-slate-500'}`}>{w.name}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <p className="text-[9px] text-center text-slate-400 mt-2 italic">Ketuk atau tahan bar pada grafik untuk melihat rincian tanggal.</p>
+        </Card>
+
+        <Card className="p-4 space-y-3">
+          <h3 className="font-extrabold text-xs uppercase text-slate-800 border-b border-slate-100 pb-2">Riwayat Transaksi: <span className={theme.txt}>{selectedGraphDate || safeDateStr}</span></h3>
+          <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+            {selectedGraphTx.length === 0 ? <p className="text-xs text-slate-400 text-center py-6 italic">Tidak ada transaksi pada tanggal ini.</p> : selectedGraphTx.slice().reverse().map(tx => (
+              <div key={tx.id} className={`p-3 rounded-xl border flex justify-between items-center transition-all ${theme.light} ${theme.border}`}>
+                <div>
+                  <p className={`font-black text-xs uppercase ${theme.txt}`}>{tx.dateStr} <span className="text-[10px] font-medium text-slate-500">({getMakassarTimeString(tx.timestamp)})</span></p>
+                  {tx.gasProduct && <p className="text-[10px] font-bold text-orange-700">{tx.gasProduct}</p>}
+                  <p className="text-[10px] text-slate-600 mt-1">{tx.quantity} {theme.label} • Rp {tx.unitPrice.toLocaleString('id-ID')}/unit {tx.unitPrice === 0 && <span className="text-[9px] bg-orange-100 text-orange-700 px-1 py-0.5 rounded font-bold ml-1">FOC</span>}</p>
+                </div>
+                <div className="text-right">
+                  <p className="font-black text-slate-900">Rp {(tx.totalAmount||0).toLocaleString('id-ID')}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </main>
     </div>
   );
 };
@@ -400,17 +601,20 @@ const DivisionHeader = ({ title, icon: Icon, price, priceLabel, colorClass, onNa
   </div>
 );
 
-const DivisionSplitStatsCards = ({ todayVol, myTodayVol, todayRev, myTodayRev, unitLabel }) => (
+const DivisionSplitStatsCards = ({ todayVol, myTodayVol, todayRev, myTodayRev, todayFocVol, unitLabel }) => (
   <div className="grid grid-cols-2 gap-3">
     <Card className="p-3.5 bg-emerald-600 text-white space-y-1 shadow-sm border-emerald-500">
-      <span className="text-[10px] font-bold text-emerald-200 uppercase tracking-wider block">TOTAL VOLUME</span>
+      <div className="flex justify-between items-start">
+        <span className="text-[10px] font-bold text-emerald-200 uppercase tracking-wider block">TOTAL VOLUME</span>
+        {todayFocVol > 0 && <span className="text-[9px] font-extrabold bg-orange-500 text-white px-1.5 py-0.5 rounded shadow-xs">FOC: {todayFocVol}</span>}
+      </div>
       <div className="text-2xl font-black">{todayVol} <span className="text-xs font-normal">{unitLabel}</span></div>
       <div className="text-[11px] font-medium text-emerald-100 pt-1 border-t border-emerald-500/40 flex justify-between">
         <span>Input Saya:</span><span className="font-bold">{myTodayVol} {unitLabel}</span>
       </div>
     </Card>
     <Card className="p-3.5 bg-emerald-600 text-white space-y-1 shadow-sm border-emerald-500">
-      <span className="text-[10px] font-bold text-emerald-200 uppercase tracking-wider block">TOTAL OMSET</span>
+      <span className="text-[10px] font-bold text-emerald-200 uppercase tracking-wider block">TOTAL OMSET (NON-FOC)</span>
       <div className="text-xl font-black">Rp {todayRev.toLocaleString('id-ID')}</div>
       <div className="text-[11px] font-medium text-emerald-100 pt-1 border-t border-emerald-500/40 flex justify-between">
         <span>Omset Saya:</span><span className="font-bold">Rp {myTodayRev.toLocaleString('id-ID')}</span>
@@ -420,23 +624,21 @@ const DivisionSplitStatsCards = ({ todayVol, myTodayVol, todayRev, myTodayRev, u
 );
 
 const PurchasePerformanceGraph = ({ txList = [] }) => {
-  const [viewMode, setViewMode] = useState('CUSTOMER'); // 'CUSTOMER' | 'OPERATOR'
+  const [viewMode, setViewMode] = useState('CUSTOMER');
 
   const chartData = useMemo(() => {
     const dataMap = {};
-    txList.forEach(t => {
+    const safeTxList = Array.isArray(txList) ? txList : [];
+    safeTxList.forEach(t => {
       const key = viewMode === 'CUSTOMER' ? (t.entityName || 'UMUM') : (t.operatorName || 'SISTEM');
       if (!dataMap[key]) dataMap[key] = 0;
       dataMap[key] += (t.quantity || 1);
     });
     
-    // Sort descending by volume and take top 6
-    const sorted = Object.entries(dataMap)
+    return Object.entries(dataMap)
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 6);
-      
-    return sorted;
   }, [txList, viewMode]);
 
   const maxVal = chartData.length > 0 ? Math.max(...chartData.map(d => d.count), 5) : 5;
@@ -448,8 +650,8 @@ const PurchasePerformanceGraph = ({ txList = [] }) => {
           <PieChart size={15} className="text-emerald-600" /> Performa ({viewMode === 'CUSTOMER' ? 'Top Pelanggan' : 'Top Operator'})
         </h3>
         <div className="flex bg-slate-100 p-0.5 rounded-lg text-[9px] font-bold">
-          <button onClick={() => setViewMode('CUSTOMER')} className={`px-2 py-1 rounded transition-colors ${viewMode === 'CUSTOMER' ? 'bg-white shadow-xs text-emerald-700' : 'text-slate-500'}`}>Pelanggan</button>
-          <button onClick={() => setViewMode('OPERATOR')} className={`px-2 py-1 rounded transition-colors ${viewMode === 'OPERATOR' ? 'bg-white shadow-xs text-emerald-700' : 'text-slate-500'}`}>Operator</button>
+          <button onClick={() => setViewMode('CUSTOMER')} className={`px-2 py-1 rounded transition-colors cursor-pointer ${viewMode === 'CUSTOMER' ? 'bg-white shadow-xs text-emerald-700' : 'text-slate-500'}`}>Pelanggan</button>
+          <button onClick={() => setViewMode('OPERATOR')} className={`px-2 py-1 rounded transition-colors cursor-pointer ${viewMode === 'OPERATOR' ? 'bg-white shadow-xs text-emerald-700' : 'text-slate-500'}`}>Operator</button>
         </div>
       </div>
       <div className="flex items-end justify-around gap-2 h-28 pt-4 pb-1 px-1 bg-slate-50 rounded-xl border border-slate-200 overflow-x-auto">
@@ -491,15 +693,8 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   
   const [globalPrice, setGlobalPrice] = useState(() => fallbackPrices[dbKeys.divType] || 20000); 
   const [gasMasterConfig, setGasMasterConfig] = useState({
-    'Oxygen, 6 m³': 150000,
-    'Acetylene': 550000,
-    'Argon, 6 m³': 550000,
-    'Nitrogen, 6 m³': 400000,
-    'CO₂, 25 kg': 550000,
-    'LPG, 50 kg': 1500000,
-    'LPG, 12 kg': 275000,
-    'Oxygen Medis, 2 m³': 100000,
-    'Oxygen Medis, 6 m³': 150000
+    'Oxygen, 6 m³': 150000, 'Acetylene': 550000, 'Argon, 6 m³': 550000, 'Nitrogen, 6 m³': 400000,
+    'CO₂, 25 kg': 550000, 'LPG, 50 kg': 1500000, 'LPG, 12 kg': 275000, 'Oxygen Medis, 2 m³': 100000, 'Oxygen Medis, 6 m³': 150000
   });
   const [customerGasSelections, setCustomerGasSelections] = useState({});
   const [shiftViewDate, setShiftViewDate] = useState('TODAY');
@@ -514,7 +709,6 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
 
   const [customQtyRow, setCustomQtyRow] = useState(null);
   const [customQtyVal, setCustomQtyVal] = useState('');
-
   const [lastTxToast, setLastTxToast] = useState(null);
 
   const todayStr = useMemo(() => getMakassarDateString(), []);
@@ -531,12 +725,8 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
             setGasMasterConfig(dat.products);
           } else if (Number(dat.price) > 0) {
             setGlobalPrice(Number(dat.price));
-          } else {
-            setGlobalPrice(defaultFp);
-          }
-        } else {
-          setGlobalPrice(defaultFp);
-        }
+          } else { setGlobalPrice(defaultFp); }
+        } else { setGlobalPrice(defaultFp); }
       }, ()=>{ setGlobalPrice(defaultFp); }));
       
       unsubs.push(onSnapshot(getPublicPath(dbKeys.entity), snap => { 
@@ -548,9 +738,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
         const l = snap.docs.map(d=>({id:d.id,...d.data()})); 
         if(Array.isArray(l)) { setAllTx(l); setLocalData('transactions', l); } 
       }, ()=>{}));
-    } catch(e){
-      setGlobalPrice(defaultFp);
-    }
+    } catch(e){ setGlobalPrice(defaultFp); }
     return () => unsubs.forEach(u => u && u());
   }, [dbKeys.entity, dbKeys.config, dbKeys.divType, fallbackPrices]);
 
@@ -560,8 +748,9 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   
   const todayVol = todayActiveTx.reduce((s, t) => s + (t.quantity || 1), 0);
   const myTodayVol = myTodayTx.reduce((s, t) => s + (t.quantity || 1), 0);
-  const todayRev = todayActiveTx.reduce((s, t) => s + (t.totalAmount || 0), 0);
-  const myTodayRev = myTodayTx.reduce((s, t) => s + (t.totalAmount || 0), 0);
+  const todayRev = todayActiveTx.filter(t => t.unitPrice !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
+  const myTodayRev = myTodayTx.filter(t => t.unitPrice !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
+  const todayFocVol = todayActiveTx.filter(t => t.unitPrice === 0).reduce((s, t) => s + (t.quantity || 1), 0);
 
   const displayTxList = activeTx.filter(t => t.dateStr === shiftActiveDateStr);
   const displayActiveTxList = displayTxList.filter(t => t.status !== 'VOIDED');
@@ -569,44 +758,52 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   
   const tabVol = displayActiveTxList.reduce((s, t) => s + (t.quantity || 1), 0);
   const myTabVol = displayMyTxList.reduce((s, t) => s + (t.quantity || 1), 0);
-  const tabRev = displayActiveTxList.reduce((s, t) => s + (t.totalAmount || 0), 0);
-  const myTabRev = displayMyTxList.reduce((s, t) => s + (t.totalAmount || 0), 0);
+  const tabRev = displayActiveTxList.filter(t => t.unitPrice !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
+  const myTabRev = displayMyTxList.filter(t => t.unitPrice !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
+  const tabFocVol = displayActiveTxList.filter(t => t.unitPrice === 0).reduce((s, t) => s + (t.quantity || 1), 0);
 
   const processedEntities = useMemo(() => {
-    return entities
-      .filter(e => {
-        const term = search.toLowerCase();
-        const nm = (e.name || e.shipName || '').toLowerCase();
-        const cp = (e.companyName || e.agentName || '').toLowerCase();
-        return nm.includes(term) || cp.includes(term);
-      })
-      .map(ent => {
-        const count = todayActiveTx.filter(t => t.entityId === ent.id).reduce((s,t) => s + (t.quantity||1), 0);
-        return { ...ent, todayCount: count };
-      })
-      .sort((a, b) => {
-        if (b.todayCount !== a.todayCount) {
-          return b.todayCount - a.todayCount;
-        }
-        const nameA = (a.name || a.shipName || '').toLowerCase();
-        const nameB = (b.name || b.shipName || '').toLowerCase();
-        return nameA.localeCompare(nameB);
-      });
+    const term = search.toLowerCase();
+    const mapped = entities.map(ent => {
+      const count = todayActiveTx.filter(t => t.entityId === ent.id).reduce((s,t) => s + (t.quantity||1), 0);
+      return { ...ent, todayCount: count };
+    });
+
+    const filtered = mapped.filter(e => {
+      const nm = (e.name || e.shipName || '').toLowerCase();
+      const cp = (e.companyName || e.agentName || '').toLowerCase();
+      return nm.includes(term) || cp.includes(term);
+    });
+
+    return filtered.sort((a, b) => {
+      if (b.todayCount !== a.todayCount) return b.todayCount - a.todayCount;
+      const nameA = (a.name || a.shipName || '').toLowerCase();
+      const nameB = (b.name || b.shipName || '').toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
   }, [entities, search, todayActiveTx]);
 
   const handleAddTx = async (entity, qty = 1) => {
     if (isReadOnly || !entity) return;
     
-    let unitPrice = globalPrice > 0 ? globalPrice : (fallbackPrices[dbKeys.divType] || 20000);
+    let unitPrice = globalPrice > 0 ? globalPrice : (fallbackPrices[dbKeys.divType] === 0 ? 0 : 20000);
     let activeGasProd = null;
     
     if (dbKeys.divType === 'GAS_INDUSTRI') {
       activeGasProd = customerGasSelections[entity.id] || Object.keys(gasMasterConfig)[0] || 'Oxygen, 6 m³';
-      const customGas = Number(entity.gasCustomPrices?.[activeGasProd]);
-      unitPrice = (customGas > 0) ? customGas : (gasMasterConfig[activeGasProd] || 150000);
+      const customGas = entity.gasCustomPrices?.[activeGasProd];
+      if (customGas !== undefined && customGas !== null && customGas !== '') {
+        unitPrice = Number(customGas);
+      } else {
+        unitPrice = gasMasterConfig[activeGasProd] || 150000;
+      }
     } else {
-      const entPrice = Number(entity.price);
-      unitPrice = (entPrice > 0) ? entPrice : (globalPrice > 0 ? globalPrice : (fallbackPrices[dbKeys.divType] || 20000));
+      const entPrice = entity.price;
+      if (entPrice !== undefined && entPrice !== null && entPrice !== '') {
+        unitPrice = Number(entPrice);
+      } else {
+        unitPrice = globalPrice > 0 ? globalPrice : (globalPrice === 0 ? 0 : 20000);
+      }
     }
 
     const txId = 'tx_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
@@ -623,38 +820,24 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
       dateStr: todayStr,
       status: 'COMPLETED'
     };
-    
     if (activeGasProd) txPayload.gasProduct = activeGasProd;
 
     const updatedTxList = [...allTx, { id: txId, ...txPayload }];
-    setAllTx(updatedTxList);
-    setLocalData('transactions', updatedTxList);
+    setAllTx(updatedTxList); setLocalData('transactions', updatedTxList);
 
     setLastTxToast({ id: txId, name: entity.name || entity.shipName, qty, amount: unitPrice * qty });
-    setTimeout(() => {
-      setLastTxToast(prev => prev?.id === txId ? null : prev);
-    }, 6000);
+    setTimeout(() => { setLastTxToast(prev => prev?.id === txId ? null : prev); }, 6000);
 
-    try {
-      await setDoc(getDocPath('transactions', txId), txPayload);
-    } catch (err) {
-      console.warn("Firebase write warning (Permission/Offline), operating via local storage fallback:", err);
-    }
+    try { await setDoc(getDocPath('transactions', txId), txPayload); } 
+    catch (err) { console.warn("Firebase write warning (Offline), operating via local storage fallback."); }
   };
 
   const handleUndo = async (txId) => {
     if (isReadOnly) return;
-    
     const updatedTxList = allTx.map(t => t.id === txId ? { ...t, status: 'VOIDED', voidedAt: Date.now(), voidedBy: user.name } : t);
-    setAllTx(updatedTxList);
-    setLocalData('transactions', updatedTxList);
+    setAllTx(updatedTxList); setLocalData('transactions', updatedTxList);
     setLastTxToast(null);
-
-    try { 
-      await updateDoc(getDocPath('transactions', txId), { status: 'VOIDED', voidedAt: Date.now(), voidedBy: user.name }); 
-    } catch(err){
-      console.warn("Firebase void warning:", err);
-    }
+    try { await updateDoc(getDocPath('transactions', txId), { status: 'VOIDED', voidedAt: Date.now(), voidedBy: user.name }); } catch(err){}
   };
 
   const handleAddNewEntity = async (e) => {
@@ -667,17 +850,13 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
       return setAddError(`Nama "${cleanName}" sudah terdaftar.`);
     }
 
-    const generatedUser = cleanName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() + Math.floor(Math.random() * 900 + 100);
-    
     const newEntity = {
-      id: `${dbKeys.prefix}_${Date.now()}`,
-      address: newAddr.trim(),
+      id: `${dbKeys.prefix}_${Date.now()}`, 
+      address: newAddr.trim(), 
       whatsapp: newWa.trim(),
-      username: generatedUser,
-      password: '123456',
-      portalAccessEnabled: true,
-      price: 0,
-      gasCustomPrices: {},
+      portalAccessEnabled: false, 
+      price: '', // Blank means fallback to master price
+      gasCustomPrices: {}, 
       createdAt: Date.now()
     };
 
@@ -690,15 +869,10 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     }
 
     const updatedEntities = [...safeEntities, newEntity];
-    setEntities(updatedEntities);
-    setLocalData(dbKeys.entity, updatedEntities);
+    setEntities(updatedEntities); setLocalData(dbKeys.entity, updatedEntities);
     setIsAddOpen(false);
     
-    try { 
-      await setDoc(getDocPath(dbKeys.entity, newEntity.id), newEntity); 
-    } catch (err) {
-      console.warn("Firebase entity add warning:", err);
-    }
+    try { await setDoc(getDocPath(dbKeys.entity, newEntity.id), newEntity); } catch (err) {}
   };
 
   const getAddButtons = (entity) => {
@@ -712,10 +886,8 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
           <div className="flex items-center gap-1 animate-in fade-in slide-in-from-right-2">
             <input 
               type="number" min="1" autoFocus 
-              value={customQtyVal} onChange={e=>setCustomQtyVal(e.target.value)} 
-              onWheel={(e) => e.target.blur()}
-              className="w-14 p-1 text-xs font-bold border border-orange-300 rounded-lg text-center outline-none focus:ring-1 focus:ring-orange-500" 
-              placeholder="Jml" 
+              value={customQtyVal} onChange={e=>setCustomQtyVal(e.target.value)} onWheel={(e) => e.target.blur()}
+              className="w-14 p-1 text-xs font-bold border border-orange-300 rounded-lg text-center outline-none focus:ring-1 focus:ring-orange-500" placeholder="Jml" 
             />
             <button onClick={()=>{const q = parseInt(customQtyVal); if(q>0) handleAddTx(entity, q); setCustomQtyRow(null); setCustomQtyVal('');}} className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] rounded-lg cursor-pointer shadow-xs">✔</button>
             <button onClick={()=>{setCustomQtyRow(null); setCustomQtyVal('');}} className="px-2 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-600 font-black text-[11px] rounded-lg cursor-pointer shadow-xs">✖</button>
@@ -755,7 +927,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     <div className="max-w-md sm:max-w-xl mx-auto px-3 sm:px-4 py-4 pb-24 space-y-4 relative">
       <DivisionHeader title={title} icon={icon} price={displayHeaderPrice} priceLabel={priceLabel} colorClass={textClass} onNavigateHome={onNavigateHome} />
       
-      <DivisionSplitStatsCards todayVol={todayVol} myTodayVol={myTodayVol} todayRev={todayRev} myTodayRev={myTodayRev} unitLabel={unitLabel} />
+      <DivisionSplitStatsCards todayVol={todayVol} myTodayVol={myTodayVol} todayRev={todayRev} myTodayRev={myTodayRev} todayFocVol={todayFocVol} unitLabel={unitLabel} />
 
       {lastTxToast && (
         <div className="bg-slate-900 text-white p-3 rounded-2xl shadow-xl flex items-center justify-between text-xs animate-in slide-in-from-top-2 border border-slate-700 z-50 sticky top-16 shadow-emerald-500/10">
@@ -763,18 +935,13 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
             <p className="font-extrabold uppercase text-emerald-400 flex items-center gap-1"><Check size={14}/> Berhasil Input: {lastTxToast.name}</p>
             <p className="text-[10px] text-slate-300 mt-0.5">{lastTxToast.qty} {unitLabel} • Rp {lastTxToast.amount.toLocaleString('id-ID')}</p>
           </div>
-          <button 
-            onClick={() => handleUndo(lastTxToast.id)} 
-            className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-black text-[11px] rounded-xl cursor-pointer shadow-sm transition-all flex items-center gap-1"
-          >
-            <X size={12}/> Batalkan
-          </button>
+          <button onClick={() => handleUndo(lastTxToast.id)} className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-black text-[11px] rounded-xl cursor-pointer shadow-sm flex items-center gap-1"><X size={12}/> Batalkan</button>
         </div>
       )}
 
       <div className="grid grid-cols-2 gap-1 bg-slate-200 p-1 rounded-2xl text-xs font-bold">
-        <button onClick={() => setActiveTab('INPUT')} className={`py-2.5 rounded-xl transition-all ${activeTab==='INPUT'?`bg-white ${textClass} shadow-xs`:'text-slate-600'}`}>Input Penjualan</button>
-        <button onClick={() => setActiveTab('REPORT')} className={`py-2.5 rounded-xl transition-all ${activeTab==='REPORT'?`bg-white ${textClass} shadow-xs`:'text-slate-600'}`}>Laporan Harian</button>
+        <button onClick={() => setActiveTab('INPUT')} className={`py-2.5 rounded-xl transition-all cursor-pointer ${activeTab==='INPUT'?`bg-white ${textClass} shadow-xs`:'text-slate-600'}`}>Input Penjualan</button>
+        <button onClick={() => setActiveTab('REPORT')} className={`py-2.5 rounded-xl transition-all cursor-pointer ${activeTab==='REPORT'?`bg-white ${textClass} shadow-xs`:'text-slate-600'}`}>Laporan Harian</button>
       </div>
 
       {activeTab === 'INPUT' && (
@@ -783,38 +950,13 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
             <div className="flex justify-between items-center pb-2 border-b">
               <label className="text-xs font-bold text-slate-700 uppercase flex items-center gap-1"><Users size={14} className={textClass}/> Pilih {formLabel}</label>
               {canAddEntity && (
-                <Button onClick={()=>{
-                  setNewName('');
-                  setNewCompany('');
-                  setNewCustType('PENGGUNA');
-                  setNewAddr('');
-                  setNewWa('');
-                  setAddError('');
-                  setIsAddOpen(true);
-                }} variant={buttonVariant} className="py-1.5 px-3 text-[11px]">
-                  <Plus size={14} /> Baru
-                </Button>
+                <Button onClick={()=>{ setNewName(''); setNewCompany(''); setNewCustType('PENGGUNA'); setNewAddr(''); setNewWa(''); setAddError(''); setIsAddOpen(true); }} variant={buttonVariant} className="py-1.5 px-3 text-[11px]"><Plus size={14} /> Baru</Button>
               )}
             </div>
             
             <div className="relative">
-              <input 
-                type="text" 
-                placeholder="Cari nama..." 
-                value={search} 
-                onChange={e=>setSearch(e.target.value)} 
-                className="w-full p-2.5 pr-9 bg-slate-50 border rounded-xl text-xs font-bold uppercase outline-none focus:ring-2 focus:ring-emerald-500" 
-              />
-              {search && (
-                <button 
-                  type="button" 
-                  onClick={() => setSearch('')} 
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 bg-slate-200 text-slate-500 hover:bg-slate-300 hover:text-slate-700 rounded-lg cursor-pointer transition-colors"
-                  title="Hapus pencarian"
-                >
-                  <X size={14} />
-                </button>
-              )}
+              <input type="text" placeholder="Cari nama..." value={search} onChange={e=>setSearch(e.target.value)} className="w-full p-2.5 pr-9 bg-slate-50 border rounded-xl text-xs font-bold uppercase outline-none focus:ring-2 focus:ring-emerald-500" />
+              {search && <button type="button" onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 bg-slate-200 text-slate-500 hover:bg-slate-300 rounded-lg cursor-pointer"><X size={14} /></button>}
             </div>
 
             <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
@@ -824,20 +966,12 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                 
                 if (dbKeys.divType === 'GAS_INDUSTRI') {
                   const currentGasProduct = customerGasSelections[ent.id] || Object.keys(gasMasterConfig)[0] || 'Oxygen, 6 m³';
-                  const gasCustPrice = Number(ent.gasCustomPrices?.[currentGasProduct]);
-                  let displayItemPrice = 0;
-                  let isCustomBadge = false;
-
-                  if (gasCustPrice && gasCustPrice > 0) {
-                    displayItemPrice = gasCustPrice;
-                    isCustomBadge = true;
-                  } else {
-                    displayItemPrice = gasMasterConfig[currentGasProduct] || 150000;
-                  }
-
+                  const customGasVal = ent.gasCustomPrices?.[currentGasProduct];
+                  const hasCustomGas = customGasVal !== undefined && customGasVal !== null && customGasVal !== '';
+                  const displayItemPrice = hasCustomGas ? Number(customGasVal) : (gasMasterConfig[currentGasProduct] || 150000);
                   const gasClasses = isActiveToday 
                     ? "flex flex-col p-3.5 rounded-2xl border bg-white border-orange-300 shadow-md ring-1 ring-orange-50 gap-2.5 transition-all"
-                    : "flex flex-col p-3.5 rounded-2xl border bg-orange-50/40 border-orange-100 gap-2.5 hover:bg-orange-50/80 opacity-80 hover:opacity-100 transition-all shadow-sm";
+                    : "flex flex-col p-3.5 rounded-2xl border bg-orange-50/40 border-orange-100 gap-2.5 hover:bg-orange-50/80 transition-all opacity-80 hover:opacity-100";
 
                   return (
                     <div key={ent.id} className={gasClasses}>
@@ -848,29 +982,19 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${isActiveToday ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>(Total: {count})</span>
                           </div>
                           {ent.companyName && <p className="text-[10px] text-slate-500 truncate mt-0.5">PT: {ent.companyName}</p>}
-                          {ent.address && <p className="text-[10px] text-slate-500 truncate mt-0.5">{ent.address}</p>}
                         </div>
                       </div>
                       <div className={`flex flex-col sm:flex-row sm:items-center justify-between border-t pt-2.5 mt-1 gap-2 ${isActiveToday ? 'border-orange-100' : 'border-orange-100/50'}`}>
                         <div className="flex flex-col gap-1 w-full sm:w-60">
-                          <select
-                            value={currentGasProduct}
-                            onChange={e => setCustomerGasSelections({...customerGasSelections, [ent.id]: e.target.value})}
-                            className="w-full p-2 bg-orange-50 border border-orange-200 rounded-xl text-[11px] font-black text-orange-950 outline-none focus:ring-2 focus:ring-orange-400 shadow-inner cursor-pointer"
-                          >
+                          <select value={currentGasProduct} onChange={e => setCustomerGasSelections({...customerGasSelections, [ent.id]: e.target.value})} className="w-full p-2 bg-orange-50 border border-orange-200 rounded-xl text-[11px] font-black text-orange-950 outline-none focus:ring-2 focus:ring-orange-400 shadow-inner cursor-pointer">
                             {Object.keys(gasMasterConfig).map(gpName => {
-                              const isCustom = Number(ent.gasCustomPrices?.[gpName]) > 0;
-                              const price = isCustom ? Number(ent.gasCustomPrices[gpName]) : (gasMasterConfig[gpName] || 0);
-                              return (
-                                <option key={gpName} value={gpName}>
-                                  {gpName} - Rp {price.toLocaleString('id-ID')} {isCustom ? '(Khusus)' : ''}
-                                </option>
-                              )
+                              const cGas = ent.gasCustomPrices?.[gpName];
+                              const isCust = cGas !== undefined && cGas !== null && cGas !== '';
+                              const price = isCust ? Number(cGas) : (gasMasterConfig[gpName] || 0);
+                              return <option key={gpName} value={gpName}>{gpName} - Rp {price.toLocaleString('id-ID')} {isCust ? '(Khusus)' : ''}</option>
                             })}
                           </select>
-                          <span className="text-[10px] text-orange-700 font-bold px-1">
-                            Harga: Rp {displayItemPrice.toLocaleString('id-ID')} {isCustomBadge ? '(Khusus)' : '(Master)'}
-                          </span>
+                          <span className="text-[10px] text-orange-700 font-bold px-1">Harga: Rp {displayItemPrice.toLocaleString('id-ID')} {hasCustomGas ? (displayItemPrice===0 ? '(FOC)' : '(Khusus)') : '(Master)'}</span>
                         </div>
                         {!isReadOnly && <div className="flex items-center gap-1 shrink-0 self-end sm:self-auto">{getAddButtons(ent)}</div>}
                       </div>
@@ -878,20 +1002,12 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                   );
                 }
 
-                let displayItemPrice = 0;
-                let isCustomBadge = false;
-
-                const entPrice = Number(ent.price);
-                if (entPrice && entPrice > 0) {
-                  displayItemPrice = entPrice;
-                  isCustomBadge = true;
-                } else {
-                  displayItemPrice = globalPrice > 0 ? globalPrice : (fallbackPrices[dbKeys.divType] || 20000);
-                }
-
+                const entPrice = ent.price;
+                const hasCustomPrice = entPrice !== undefined && entPrice !== null && entPrice !== '';
+                const displayItemPrice = hasCustomPrice ? Number(entPrice) : (globalPrice > 0 ? globalPrice : (globalPrice === 0 ? 0 : 20000));
                 const nonGasClasses = isActiveToday
                   ? "flex justify-between items-center p-3 rounded-xl border bg-white border-slate-300 shadow-md ring-1 ring-slate-100 gap-2 transition-all"
-                  : "flex justify-between items-center p-2.5 rounded-xl border bg-slate-50/70 border-slate-200 gap-2 hover:bg-slate-100 opacity-80 hover:opacity-100 transition-all";
+                  : "flex justify-between items-center p-2.5 rounded-xl border bg-slate-50/70 border-slate-200 gap-2 opacity-80 hover:opacity-100 transition-all hover:bg-slate-100";
 
                 return (
                   <div key={ent.id} className={nonGasClasses}>
@@ -901,9 +1017,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${isActiveToday ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}>(Total: {count})</span>
                       </div>
                       {ent.companyName && <p className="text-[10px] text-slate-500 truncate mt-0.5">PT: {ent.companyName}</p>}
-                      {ent.agentName && <p className="text-[10px] text-slate-500 truncate mt-0.5">Agen: {ent.agentName}</p>}
-                      <p className="text-[10px] text-emerald-700 font-bold mt-0.5">Rp {displayItemPrice.toLocaleString('id-ID')} {isCustomBadge ? '(Khusus)' : '(Master)'}</p>
-                      {ent.address && <p className="text-[10px] text-slate-500 truncate mt-0.5">{ent.address}</p>}
+                      <p className="text-[10px] text-emerald-700 font-bold mt-0.5">Rp {displayItemPrice.toLocaleString('id-ID')} {hasCustomPrice ? (displayItemPrice===0 ? '(FOC)' : '(Khusus)') : '(Master)'}</p>
                     </div>
                     {!isReadOnly && <div className="flex items-center gap-1 shrink-0">{getAddButtons(ent)}</div>}
                   </div>
@@ -911,30 +1025,27 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
               })}
             </div>
           </Card>
-          
           <PurchasePerformanceGraph txList={todayActiveTx} />
         </div>
       )}
 
       {activeTab === 'REPORT' && (
         <div className="space-y-4">
-          <DivisionSplitStatsCards todayVol={tabVol} myTodayVol={myTabVol} todayRev={tabRev} myTodayRev={myTabRev} unitLabel={unitLabel} />
-
+          <DivisionSplitStatsCards todayVol={tabVol} myTodayVol={myTabVol} todayRev={tabRev} myTodayRev={myTabRev} todayFocVol={tabFocVol} unitLabel={unitLabel} />
           <Card className="p-4 space-y-3">
             <div className="flex justify-between items-center pb-2 border-b border-slate-100">
               <h3 className="font-extrabold text-xs uppercase text-slate-800">Riwayat Harian</h3>
               <div className="flex bg-slate-100 p-1 rounded-xl gap-1 text-[11px] font-bold shadow-inner">
-                <button onClick={()=>setShiftViewDate('TODAY')} className={`px-3 py-1.5 rounded-lg transition-all ${shiftViewDate==='TODAY'?'bg-white shadow-xs text-emerald-700':'text-slate-500 hover:text-slate-700'}`}>Hari Ini</button>
-                <button onClick={()=>setShiftViewDate('YESTERDAY')} className={`px-3 py-1.5 rounded-lg transition-all ${shiftViewDate==='YESTERDAY'?'bg-white shadow-xs text-emerald-700':'text-slate-500 hover:text-slate-700'}`}>Kemarin</button>
+                <button onClick={()=>setShiftViewDate('TODAY')} className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${shiftViewDate==='TODAY'?'bg-white shadow-xs text-emerald-700':'text-slate-500'}`}>Hari Ini</button>
+                <button onClick={()=>setShiftViewDate('YESTERDAY')} className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${shiftViewDate==='YESTERDAY'?'bg-white shadow-xs text-emerald-700':'text-slate-500'}`}>Kemarin</button>
               </div>
             </div>
-
             <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
               {displayTxList.length === 0 ? <p className="text-xs text-slate-400 text-center py-6 italic">Belum ada transaksi.</p> : displayTxList.slice().reverse().map(tx => (
                 <div key={tx.id} className="flex justify-between items-center p-2.5 bg-slate-50 rounded-xl text-xs border border-slate-100">
                   <div>
                     <p className="font-extrabold uppercase">{tx.entityName} {tx.gasProduct && <span className="text-[10px] font-normal text-orange-700">({tx.gasProduct})</span>}</p>
-                    <p className="text-[10px] text-slate-400">{getMakassarTimeString(tx.timestamp)} WITA — {tx.quantity} {unitLabel} — Op: {tx.operatorName}</p>
+                    <p className="text-[10px] text-slate-400">{getMakassarTimeString(tx.timestamp)} WITA — {tx.quantity} {unitLabel} — Op: {tx.operatorName} {tx.unitPrice === 0 && <span className="text-[9px] bg-orange-100 text-orange-700 px-1 py-0.2 rounded font-bold ml-1">FOC</span>}</p>
                   </div>
                   <div className="text-right flex items-center gap-2">
                     <div>
@@ -949,7 +1060,6 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
               ))}
             </div>
           </Card>
-
           <PurchasePerformanceGraph txList={displayActiveTxList} />
         </div>
       )}
@@ -957,33 +1067,28 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
       <Modal isOpen={isAddOpen} onClose={()=>setIsAddOpen(false)} title={`Tambah ${formLabel}`}>
         <form onSubmit={handleAddNewEntity} className="space-y-3">
           {addError && <div className="p-2 bg-red-50 text-red-700 text-xs font-bold rounded-lg">{addError}</div>}
-          <div className="p-2.5 bg-slate-100 text-slate-600 rounded-xl text-[10px] font-bold text-center mb-3">
-            Menambahkan pelanggan di sini otomatis mengikuti <span className="text-emerald-700 font-black">Master Harga</span>. Untuk harga khusus, gunakan Panel Admin.
-          </div>
+          <div className="p-2.5 bg-slate-100 text-slate-600 rounded-xl text-[10px] font-bold text-center mb-3">Menambahkan pelanggan di sini otomatis mengikuti <span className="text-emerald-700 font-black">Master Harga</span>. Portal pelanggan diatur non-aktif secara default.</div>
           <div>
             <label className="text-[10px] font-bold uppercase text-slate-500">{formLabel} (Wajib Unik)</label>
             <input type="text" value={newName} onChange={e=>setNewName(e.target.value)} placeholder={`Input ${formLabel}...`} className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold uppercase" required autoFocus />
           </div>
-          
           {(dbKeys.divType === 'MOBIL_TANGKI' || dbKeys.divType === 'GAS_INDUSTRI') && (
             <div>
               <label className="text-[10px] font-bold uppercase text-slate-500">Nama PT (Opsional)</label>
               <input type="text" value={newCompany} onChange={e=>setNewCompany(e.target.value)} placeholder="Nama PT / Perusahaan" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold uppercase" />
             </div>
           )}
-
           {dbKeys.divType === 'AIR_KAPAL' && (
             <div>
               <label className="text-[10px] font-bold uppercase text-slate-500">Nama Agen (Opsional)</label>
               <input type="text" value={newCompany} onChange={e=>setNewCompany(e.target.value)} placeholder="Nama Agen Kapal" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold uppercase" />
             </div>
           )}
-
           {dbKeys.divType === 'GALLON' && (
             <div className="flex gap-2">
               <div className="flex-1">
                 <label className="text-[10px] font-bold uppercase text-slate-500">Tipe Pelanggan</label>
-                <select value={newCustType} onChange={e=>setNewCustType(e.target.value)} className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold uppercase">
+                <select value={newCustType} onChange={e=>setNewCustType(e.target.value)} className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold uppercase cursor-pointer">
                   <option value="PENGGUNA">Pengguna</option>
                   <option value="RESELLER">Reseller</option>
                 </select>
@@ -991,12 +1096,11 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
               {newCustType === 'RESELLER' && (
                 <div className="flex-1">
                   <label className="text-[10px] font-bold uppercase text-slate-500">Nama Reseller</label>
-                  <input type="text" value={newCompany} onChange={e=>setNewCompany(e.target.value)} placeholder="Nama Toko/Reseller" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold uppercase" />
+                  <input type="text" value={newCompany} onChange={e=>setNewCompany(e.target.value)} placeholder="Nama Toko" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold uppercase" />
                 </div>
               )}
             </div>
           )}
-
           <div>
             <label className="text-[10px] font-bold uppercase text-slate-500">Alamat</label>
             <input type="text" value={newAddr} onChange={e=>setNewAddr(e.target.value)} placeholder="Alamat lengkap lokasi" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold" />
@@ -1005,8 +1109,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
             <label className="text-[10px] font-bold uppercase text-slate-500">No. WhatsApp {dbKeys.divType === 'TANDON' ? '(Wajib)' : '(Opsional)'}</label>
             <input type="text" value={newWa} onChange={e=>setNewWa(e.target.value)} placeholder="08xxxxxxxxxx" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold" required={dbKeys.divType === 'TANDON'} />
           </div>
-          
-          <Button type="submit" variant={buttonVariant} className="w-full py-3 mt-4">Simpan Pelanggan Baru</Button>
+          <Button type="submit" variant={buttonVariant} className="w-full py-3 mt-4 shadow-md">Simpan Pelanggan Baru</Button>
         </form>
       </Modal>
     </div>
@@ -1037,14 +1140,14 @@ const ReportsModule = ({ user, onNavigateHome }) => {
 
   const todayStr = getMakassarDateString();
   const yesterdayStr = getAdjacentDateString(todayStr, -1);
-  const activeDateStr = todaySubMode === 'TODAY' ? todayStr : (todaySubMode === 'YESTERDAY' ? yesterdayStr : selectedDate);
+  const activeDateStr = todaySubMode === 'TODAY' ? todayStr : (todaySubMode === 'YESTERDAY' ? yesterdayStr : (selectedDate || todayStr));
 
   const safeAllTx = Array.isArray(allTx) ? allTx : [];
   const activeTx = useMemo(() => {
     if (reportTab === 'TODAY') return safeAllTx.filter(t => t.dateStr === activeDateStr && t.status !== 'VOIDED');
     if (reportTab === 'WEEK') {
       try {
-        const parts = selectedWeekDate.split('-').map(Number);
+        const parts = (selectedWeekDate || todayStr).split('-').map(Number);
         const d = new Date(parts[0], parts[1] - 1, parts[2]);
         const day = d.getDay() || 7;
         const monday = new Date(d); monday.setDate(d.getDate() - day + 1);
@@ -1055,9 +1158,10 @@ const ReportsModule = ({ user, onNavigateHome }) => {
       } catch (err) { return safeAllTx.filter(t => t.dateStr === todayStr && t.status !== 'VOIDED'); }
     }
     return safeAllTx.filter(t => t.dateStr?.startsWith(selectedMonthStr) && t.status !== 'VOIDED');
-  }, [reportTab, todaySubMode, selectedDate, selectedWeekDate, selectedMonthStr, safeAllTx]);
+  }, [reportTab, todaySubMode, selectedDate, selectedWeekDate, selectedMonthStr, safeAllTx, activeDateStr, todayStr]);
 
-  const totalOmset = activeTx.reduce((s, t) => s + (t.totalAmount || 0), 0);
+  const totalOmset = activeTx.filter(t => t.unitPrice !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
+  const totalFocVol = activeTx.filter(t => t.unitPrice === 0).reduce((s, t) => s + (t.quantity || 1), 0);
 
   const divs = [
     { key: 'TANDON', name: 'Air Tandon', bg: 'bg-blue-600', txt: 'text-blue-600', unitLabel: 'Tandon' },
@@ -1069,14 +1173,20 @@ const ReportsModule = ({ user, onNavigateHome }) => {
 
   const divRevenues = divs.map(d => {
     const ts = activeTx.filter(t => t.divisionType === d.key);
-    return { ...d, rev: ts.reduce((s,t) => s+(t.totalAmount||0),0), vol: ts.reduce((s,t) => s+(t.quantity||1),0), txs: ts };
+    return { 
+      ...d, 
+      rev: ts.filter(t => t.unitPrice !== 0).reduce((s,t) => s+(t.totalAmount||0),0), 
+      vol: ts.reduce((s,t) => s+(t.quantity||1),0), 
+      foc: ts.filter(t => t.unitPrice === 0).reduce((s,t) => s+(t.quantity||1),0),
+      txs: ts 
+    };
   });
   const maxDivRev = Math.max(...divRevenues.map(d => d.rev), 1000);
 
   const weeklyData = useMemo(() => {
     if (reportTab !== 'WEEK') return [];
     try {
-      const parts = selectedWeekDate.split('-').map(Number);
+      const parts = (selectedWeekDate || todayStr).split('-').map(Number);
       const d = new Date(parts[0], parts[1] - 1, parts[2]);
       const day = d.getDay() || 7;
       const monday = new Date(d); monday.setDate(d.getDate() - day + 1);
@@ -1084,23 +1194,24 @@ const ReportsModule = ({ user, onNavigateHome }) => {
         const td = new Date(monday); td.setDate(monday.getDate() + i);
         const ds = `${td.getFullYear()}-${String(td.getMonth() + 1).padStart(2, '0')}-${String(td.getDate()).padStart(2, '0')}`;
         const dayTx = safeAllTx.filter(t => t.dateStr === ds && t.status !== 'VOIDED');
-        return { name: n, ds, omset: dayTx.reduce((s, t) => s + (t.totalAmount || 0), 0) };
+        return { name: n, ds, omset: dayTx.filter(t => t.unitPrice !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0) };
       });
     } catch(e) { return []; }
-  }, [selectedWeekDate, safeAllTx, reportTab]);
+  }, [selectedWeekDate, safeAllTx, reportTab, todayStr]);
 
   const maxWeek = Math.max(...weeklyData.map(w => w.omset), 10000);
 
   const monthData = useMemo(() => {
     if (reportTab !== 'MONTH') return [];
     try {
-      const [yr, mo] = selectedMonthStr.split('-').map(Number);
+      const parts = (selectedMonthStr || `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`).split('-');
+      const yr = Number(parts[0]); const mo = Number(parts[1]);
       const days = new Date(yr, mo, 0).getDate();
       let res = [];
       for (let i = 1; i <= days; i++) {
         const ds = `${yr}-${String(mo).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
         const txs = safeAllTx.filter(t => t.dateStr === ds && t.status !== 'VOIDED');
-        res.push({ day: i, ds, omset: txs.reduce((s,t) => s + (t.totalAmount||0), 0) });
+        res.push({ day: i, ds, omset: txs.filter(t => t.unitPrice !== 0).reduce((s,t) => s + (t.totalAmount||0), 0) });
       }
       return res;
     } catch(e) { return []; }
@@ -1109,8 +1220,8 @@ const ReportsModule = ({ user, onNavigateHome }) => {
   const maxMo = Math.max(...monthData.map(m => m.omset), 10000);
 
   const handleWhatsAppShare = () => {
-    const text = `*📊 LAPORAN POS*\n💰 Total: Rp ${totalOmset.toLocaleString('id-ID')}\n\n` +
-      divRevenues.map(d => `- ${d.name}: ${d.vol} (Rp ${d.rev.toLocaleString('id-ID')})`).join('\n');
+    const text = `*📊 LAPORAN POS*\n💰 Total Omset: Rp ${totalOmset.toLocaleString('id-ID')}${totalFocVol > 0 ? ` (FOC: ${totalFocVol} unit)` : ''}\n\n` +
+      divRevenues.map(d => `- ${d.name}: Vol ${d.vol}${d.foc > 0 ? ` (FOC ${d.foc})` : ''} | Rp ${d.rev.toLocaleString('id-ID')}`).join('\n');
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
   };
 
@@ -1128,25 +1239,25 @@ const ReportsModule = ({ user, onNavigateHome }) => {
       </div>
 
       <div className="grid grid-cols-3 gap-1 bg-slate-200 p-1 rounded-2xl text-xs font-extrabold shadow-inner">
-        <button onClick={() => {setReportTab('TODAY'); setSelectedDiv(null);}} className={`py-2.5 rounded-xl transition-all ${reportTab==='TODAY'?'bg-emerald-600 text-white shadow-md':'text-slate-700'}`}>Hari Ini</button>
-        <button onClick={() => {setReportTab('WEEK'); setSelectedDiv(null);}} className={`py-2.5 rounded-xl transition-all ${reportTab==='WEEK'?'bg-emerald-600 text-white shadow-md':'text-slate-700'}`}>Minggu Ini</button>
-        <button onClick={() => {setReportTab('MONTH'); setSelectedDiv(null);}} className={`py-2.5 rounded-xl transition-all ${reportTab==='MONTH'?'bg-emerald-600 text-white shadow-md':'text-slate-700'}`}>Bulan Ini</button>
+        <button onClick={() => {setReportTab('TODAY'); setSelectedDiv(null);}} className={`py-2.5 rounded-xl transition-all cursor-pointer ${reportTab==='TODAY'?'bg-emerald-600 text-white shadow-md':'text-slate-700'}`}>Hari Ini</button>
+        <button onClick={() => {setReportTab('WEEK'); setSelectedDiv(null);}} className={`py-2.5 rounded-xl transition-all cursor-pointer ${reportTab==='WEEK'?'bg-emerald-600 text-white shadow-md':'text-slate-700'}`}>Minggu Ini</button>
+        <button onClick={() => {setReportTab('MONTH'); setSelectedDiv(null);}} className={`py-2.5 rounded-xl transition-all cursor-pointer ${reportTab==='MONTH'?'bg-emerald-600 text-white shadow-md':'text-slate-700'}`}>Bulan Ini</button>
       </div>
 
       <Card className="p-4 space-y-4 border-slate-200 shadow-sm">
         {reportTab === 'TODAY' && (
           <div className="flex justify-between items-center pb-3 border-b border-slate-100">
             <div className="flex gap-2">
-              <button onClick={()=>setTodaySubMode('TODAY')} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${todaySubMode==='TODAY'?'bg-emerald-600 text-white':'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>Hari Ini</button>
-              <button onClick={()=>setTodaySubMode('YESTERDAY')} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${todaySubMode==='YESTERDAY'?'bg-emerald-600 text-white':'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>Kemarin</button>
+              <button onClick={()=>setTodaySubMode('TODAY')} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${todaySubMode==='TODAY'?'bg-emerald-600 text-white':'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>Hari Ini</button>
+              <button onClick={()=>setTodaySubMode('YESTERDAY')} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${todaySubMode==='YESTERDAY'?'bg-emerald-600 text-white':'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>Kemarin</button>
             </div>
-            <input type="date" value={activeDateStr} onChange={e=>{setSelectedDate(e.target.value); setTodaySubMode('CUSTOM');}} className="p-1.5 bg-slate-50 border rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500 outline-none" />
+            <input type="date" value={activeDateStr} onChange={e=>{setSelectedDate(e.target.value || getMakassarDateString()); setTodaySubMode('CUSTOM');}} className="p-1.5 bg-slate-50 border rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500 outline-none" />
           </div>
         )}
         {reportTab === 'WEEK' && (
           <div className="flex justify-between items-center pb-3 border-b border-slate-100">
             <span className="text-xs font-bold text-slate-700 uppercase">Pilih Tanggal (Acuan Minggu)</span>
-            <input type="date" value={selectedWeekDate} onChange={e=>setSelectedWeekDate(e.target.value)} className="p-1.5 bg-slate-50 border rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500 outline-none" />
+            <input type="date" value={selectedWeekDate || getMakassarDateString()} onChange={e=>setSelectedWeekDate(e.target.value || getMakassarDateString())} className="p-1.5 bg-slate-50 border rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500 outline-none" />
           </div>
         )}
         {reportTab === 'MONTH' && (
@@ -1158,7 +1269,10 @@ const ReportsModule = ({ user, onNavigateHome }) => {
 
         <div className="p-4 bg-emerald-600 text-white rounded-2xl space-y-1 shadow-md relative overflow-hidden">
           <div className="absolute top-0 right-0 p-4 opacity-10"><PieChart size={64}/></div>
-          <span className="text-[10px] font-bold text-emerald-200 uppercase tracking-wider block relative z-10">TOTAL OMSET GABUNGAN</span>
+          <div className="flex justify-between items-start relative z-10">
+            <span className="text-[10px] font-bold text-emerald-200 uppercase tracking-wider block">TOTAL OMSET GABUNGAN (NON-FOC)</span>
+            {totalFocVol > 0 && <span className="text-[10px] font-extrabold bg-orange-500 text-white px-2 py-0.5 rounded shadow-xs">Total FOC: {totalFocVol}</span>}
+          </div>
           <div className="text-3xl font-black relative z-10">Rp {totalOmset.toLocaleString('id-ID')}</div>
         </div>
 
@@ -1196,8 +1310,11 @@ const ReportsModule = ({ user, onNavigateHome }) => {
               const opsMap = {};
               divTxs.forEach(t => {
                 const op = t.operatorName || 'SYSTEM';
-                if (!opsMap[op]) opsMap[op] = { count: 0, omset: 0, vol: 0 };
-                opsMap[op].count++; opsMap[op].omset += (t.totalAmount||0); opsMap[op].vol += (t.quantity||1);
+                if (!opsMap[op]) opsMap[op] = { count: 0, omset: 0, vol: 0, foc: 0 };
+                opsMap[op].count++; 
+                if (t.unitPrice !== 0) opsMap[op].omset += (t.totalAmount||0); 
+                opsMap[op].vol += (t.quantity||1);
+                if (t.unitPrice === 0) opsMap[op].foc += (t.quantity||1);
               });
               const sortedOps = Object.entries(opsMap).sort((a,b) => b[1].omset - a[1].omset);
               
@@ -1207,7 +1324,7 @@ const ReportsModule = ({ user, onNavigateHome }) => {
                 <div key={name} className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm flex justify-between items-center text-xs">
                   <div>
                     <span className="font-black uppercase text-slate-800 block">{name}</span>
-                    <span className="text-[10px] text-slate-500 font-medium">{data.count} Transaksi ({data.vol} {divs.find(d=>d.key===selectedDiv)?.unitLabel || 'Volume'})</span>
+                    <span className="text-[10px] text-slate-500 font-medium">{data.count} Transaksi ({data.vol} {divs.find(d=>d.key===selectedDiv)?.unitLabel || 'Volume'}{data.foc > 0 ? ` • FOC: ${data.foc}` : ''})</span>
                   </div>
                   <span className="font-black text-emerald-600 text-sm">Rp {data.omset.toLocaleString('id-ID')}</span>
                 </div>
@@ -1267,28 +1384,22 @@ const AdminPanel = ({ onNavigateHome }) => {
   const [searchCust, setSearchCust] = useState('');
   
   const canManageCredentials = ['ADMIN', 'SUPER_ADMIN'].includes(sessionUser.role);
+  const canResetPassword = sessionUser.role === 'SUPER_ADMIN'; 
   
   const [prices, setPrices] = useState({ TANDON: 20000, GALLON: 6000, TANGKI: 350000, KAPAL: 50000 });
   const [gasProducts, setGasProducts] = useState({
-    'Oxygen, 6 m³': 150000,
-    'Acetylene': 550000,
-    'Argon, 6 m³': 550000,
-    'Nitrogen, 6 m³': 400000,
-    'CO₂, 25 kg': 550000,
-    'LPG, 50 kg': 1500000,
-    'LPG, 12 kg': 275000,
-    'Oxygen Medis, 2 m³': 100000,
-    'Oxygen Medis, 6 m³': 150000
+    'Oxygen, 6 m³': 150000, 'Acetylene': 550000, 'Argon, 6 m³': 550000, 'Nitrogen, 6 m³': 400000,
+    'CO₂, 25 kg': 550000, 'LPG, 50 kg': 1500000, 'LPG, 12 kg': 275000, 'Oxygen Medis, 2 m³': 100000, 'Oxygen Medis, 6 m³': 150000
   });
 
   const [custData, setCustData] = useState([]);
-  
   const [isCustModalOpen, setIsCustModalOpen] = useState(false);
   const [editingCust, setEditingCust] = useState(null);
   const [custError, setCustError] = useState('');
+  const [suggestedPwd, setSuggestedPwd] = useState('');
   
   const [custForm, setCustForm] = useState({
-      name: '', address: '', whatsapp: '', username: '', password: '',
+      name: '', address: '', whatsapp: '', username: '',
       companyName: '', agentName: '', customerType: 'PENGGUNA', resellerName: '', customPrice: '',
       gasCustomPrices: {}
   });
@@ -1297,14 +1408,18 @@ const AdminPanel = ({ onNavigateHome }) => {
   const [editingUser, setEditingUser] = useState(null);
   const [newUserName, setNewUserName] = useState('');
   const [newUserUser, setNewUserUser] = useState('');
-  const [newUserPwd, setNewUserPwd] = useState('123456');
   const [newUserRole, setNewUserRole] = useState('OPERATOR');
   const [newUserDivs, setNewUserDivs] = useState(['TANDON']);
   const [userAddError, setUserAddError] = useState('');
 
   const [resetTarget, setResetTarget] = useState(null);
-  const [resetPwd, setResetPwd] = useState('123456');
+  const [resetPwd, setResetPwd] = useState('');
   const [resetMsg, setResetMsg] = useState('');
+
+  const [credentialPromptTarget, setCredentialPromptTarget] = useState(null);
+  const [promptUsername, setPromptUsername] = useState('');
+  const [promptPassword, setPromptPassword] = useState('');
+  const [promptError, setPromptError] = useState('');
 
   const custConfigs = {
     TANDON: { key: 'tandon_drivers', nameField: 'name', prefix: 'td', label: 'Sopir Tandon', priceKey: 'TANDON' },
@@ -1317,15 +1432,11 @@ const AdminPanel = ({ onNavigateHome }) => {
   useEffect(() => {
     let unsubs = [];
     try {
-      unsubs.push(onSnapshot(getDocPath('settings', 'tandon_config'), snap => { if(snap.exists()) setPrices(p=>({...p, TANDON: snap.data().price||20000})); }, ()=>{}));
-      unsubs.push(onSnapshot(getDocPath('settings', 'gallon_config'), snap => { if(snap.exists()) setPrices(p=>({...p, GALLON: snap.data().price||6000})); }, ()=>{}));
-      unsubs.push(onSnapshot(getDocPath('settings', 'tangki_config'), snap => { if(snap.exists()) setPrices(p=>({...p, TANGKI: snap.data().price||350000})); }, ()=>{}));
-      unsubs.push(onSnapshot(getDocPath('settings', 'kapal_config'), snap => { if(snap.exists()) setPrices(p=>({...p, KAPAL: snap.data().price||50000})); }, ()=>{}));
-      unsubs.push(onSnapshot(getDocPath('settings', 'gas_config'), snap => { 
-        if(snap.exists() && snap.data().products) {
-          setGasProducts(snap.data().products);
-        }
-      }, ()=>{}));
+      unsubs.push(onSnapshot(getDocPath('settings', 'tandon_config'), snap => { if(snap.exists()) setPrices(p=>({...p, TANDON: snap.data().price??20000})); }, ()=>{}));
+      unsubs.push(onSnapshot(getDocPath('settings', 'gallon_config'), snap => { if(snap.exists()) setPrices(p=>({...p, GALLON: snap.data().price??6000})); }, ()=>{}));
+      unsubs.push(onSnapshot(getDocPath('settings', 'tangki_config'), snap => { if(snap.exists()) setPrices(p=>({...p, TANGKI: snap.data().price??350000})); }, ()=>{}));
+      unsubs.push(onSnapshot(getDocPath('settings', 'kapal_config'), snap => { if(snap.exists()) setPrices(p=>({...p, KAPAL: snap.data().price??50000})); }, ()=>{}));
+      unsubs.push(onSnapshot(getDocPath('settings', 'gas_config'), snap => { if(snap.exists() && snap.data().products) { setGasProducts(snap.data().products); } }, ()=>{}));
     } catch(e){}
     return () => unsubs.forEach(u => u && u());
   }, []);
@@ -1338,60 +1449,52 @@ const AdminPanel = ({ onNavigateHome }) => {
 
     const unsub = onSnapshot(getPublicPath(conf.key), snap => {
       const l = snap.docs.map(d=>({id:d.id,...d.data()}));
-      if (Array.isArray(l)) {
-        setCustData(l);
-        setLocalData(conf.key, l);
-      }
+      if (Array.isArray(l)) { setCustData(l); setLocalData(conf.key, l); }
     }, () => {});
     return () => unsub();
   }, [activeCategory, activeCustTab]);
 
   const updatePrice = async (key, confKey, val) => {
     if (!canManageCredentials) return;
-    const v = parseInt(val) || 0;
-    setPrices(p => ({...p, [key]: v}));
-    try { await setDoc(getDocPath('settings', confKey), { price: v, updatedBy: sessionUser.name, updatedAt: Date.now() }, { merge: true }); } catch(e){}
+    const v = val === '' ? 0 : parseInt(val);
+    setPrices(p => ({...p, [key]: isNaN(v) ? 0 : v}));
+    try { await setDoc(getDocPath('settings', confKey), { price: isNaN(v) ? 0 : v, updatedBy: sessionUser.name, updatedAt: Date.now() }, { merge: true }); } catch(e){}
   };
 
   const updateGasProductPrice = async (prodName, val) => {
     if (!canManageCredentials) return;
-    const v = parseInt(val) || 0;
-    const updatedProducts = { ...gasProducts, [prodName]: v };
+    const v = val === '' ? 0 : parseInt(val);
+    const updatedProducts = { ...gasProducts, [prodName]: isNaN(v) ? 0 : v };
     setGasProducts(updatedProducts);
-    try { 
-      await setDoc(getDocPath('settings', 'gas_config'), { products: updatedProducts, updatedBy: sessionUser.name, updatedAt: Date.now() }, { merge: true }); 
-    } catch(e){}
+    try { await setDoc(getDocPath('settings', 'gas_config'), { products: updatedProducts, updatedBy: sessionUser.name, updatedAt: Date.now() }, { merge: true }); } catch(e){}
+  };
+
+  const generateUniqueUsername = (baseName, existingList, nameKey, currentId = null) => {
+    const cleanBase = baseName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'user';
+    let candidate = cleanBase;
+    let isDuplicate = existingList.some(c => c.username?.toLowerCase() === candidate && c.id !== currentId);
+    if (isDuplicate) {
+      const rand = Math.floor(Math.random() * 900 + 100);
+      candidate = `${cleanBase}${rand}`;
+    }
+    return candidate;
   };
 
   const openAddCust = () => {
-    setCustForm({
-        name: '', address: '', whatsapp: '', username: '', password: '123456',
-        companyName: '', agentName: '', customerType: 'PENGGUNA', resellerName: '',
-        customPrice: '', gasCustomPrices: {}
-    });
-    setEditingCust(null);
-    setCustError('');
-    setIsCustModalOpen(true);
+    setCustForm({ name: '', address: '', whatsapp: '', username: '', companyName: '', agentName: '', customerType: 'PENGGUNA', resellerName: '', customPrice: '', gasCustomPrices: {} });
+    setEditingCust(null); setCustError(''); setSuggestedPwd(''); setIsCustModalOpen(true);
   };
 
   const openEditCust = (c) => {
     const nameKey = custConfigs[activeCustTab].nameField;
+    const rawPrice = c.price;
+    const customPriceInput = (rawPrice !== undefined && rawPrice !== null && rawPrice !== '') ? rawPrice : '';
     setCustForm({
-        name: c[nameKey] || '',
-        address: c.address || '',
-        whatsapp: c.whatsapp || '',
-        username: c.username || '',
-        password: '',
-        companyName: c.companyName || '',
-        agentName: c.agentName || '',
-        customerType: c.customerType || 'PENGGUNA',
-        resellerName: c.resellerName || '',
-        customPrice: (c.price && c.price > 0) ? c.price : '',
-        gasCustomPrices: c.gasCustomPrices || {}
+        name: c[nameKey] || '', address: c.address || '', whatsapp: c.whatsapp || '', username: c.username || '',
+        companyName: c.companyName || '', agentName: c.agentName || '', customerType: c.customerType || 'PENGGUNA',
+        resellerName: c.resellerName || '', customPrice: customPriceInput, gasCustomPrices: c.gasCustomPrices || {}
     });
-    setEditingCust(c);
-    setCustError('');
-    setIsCustModalOpen(true);
+    setEditingCust(c); setCustError(''); setSuggestedPwd(''); setIsCustModalOpen(true);
   };
 
   const handleSaveCustomer = async (e) => {
@@ -1402,37 +1505,29 @@ const AdminPanel = ({ onNavigateHome }) => {
     const conf = custConfigs[activeCustTab];
     const nameKey = conf.nameField;
     const safeCustData = Array.isArray(custData) ? custData : [];
+    if (safeCustData.some(c => (c[nameKey] || '').toUpperCase() === cleanName && c.id !== editingCust?.id)) return setCustError(`Nama "${cleanName}" sudah terdaftar.`);
 
-    const isDuplicate = safeCustData.some(c => (c[nameKey] || '').toUpperCase() === cleanName && c.id !== editingCust?.id);
-    if (isDuplicate) return setCustError(`Nama "${cleanName}" sudah terdaftar.`);
+    const generatedUser = custForm.username.trim().toLowerCase() || generateUniqueUsername(cleanName, safeCustData, nameKey, editingCust?.id);
 
-    const generatedUser = custForm.username.trim().toLowerCase() || cleanName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() + Math.floor(Math.random() * 900 + 100);
-
-    const payload = {
-        [nameKey]: cleanName,
-        address: custForm.address.trim(),
-        whatsapp: custForm.whatsapp.trim(),
-        username: generatedUser,
-        updatedAt: Date.now()
+    const payload = { 
+      [nameKey]: cleanName, 
+      address: custForm.address.trim(), 
+      whatsapp: custForm.whatsapp.trim(), 
+      username: generatedUser, 
+      updatedAt: Date.now() 
     };
 
     if (activeCustTab === 'GAS') {
       const cleanGasPrices = {};
-      Object.entries(custForm.gasCustomPrices || {}).forEach(([k, v]) => {
-        const num = Number(v);
-        if (num > 0) cleanGasPrices[k] = num;
+      Object.entries(custForm.gasCustomPrices || {}).forEach(([k, v]) => { 
+        if (v !== undefined && v !== null && v !== '') {
+          cleanGasPrices[k] = Number(v);
+        }
       });
       payload.gasCustomPrices = cleanGasPrices;
-      payload.price = 0; 
+      payload.price = ''; 
     } else {
-      payload.price = Number(custForm.customPrice) || 0;
-    }
-
-    if (!editingCust) {
-        payload.id = `${conf.prefix}_${Date.now()}`;
-        payload.password = (custForm.password || '').trim() || '123456';
-        payload.portalAccessEnabled = true;
-        payload.createdAt = Date.now();
+      payload.price = (custForm.customPrice !== undefined && custForm.customPrice !== null && custForm.customPrice !== '') ? Number(custForm.customPrice) : '';
     }
 
     if (activeCustTab === 'TANGKI' || activeCustTab === 'GAS') payload.companyName = custForm.companyName.trim();
@@ -1442,20 +1537,19 @@ const AdminPanel = ({ onNavigateHome }) => {
         if (custForm.customerType === 'RESELLER') payload.resellerName = custForm.resellerName.trim();
     }
 
-    const updatedList = editingCust
-        ? safeCustData.map(c => c.id === editingCust.id ? { ...c, ...payload } : c)
-        : [...safeCustData, payload];
+    if (!editingCust) {
+        payload.id = `${conf.prefix}_${Date.now()}`;
+        payload.password = suggestedPwd || generateSecurePassword(generatedUser);
+        payload.portalAccessEnabled = false; 
+        payload.createdAt = Date.now();
+    }
 
-    setCustData(updatedList);
-    setLocalData(conf.key, updatedList);
-    setIsCustModalOpen(false);
+    const updatedList = editingCust ? safeCustData.map(c => c.id === editingCust.id ? { ...c, ...payload } : c) : [...safeCustData, payload];
+    setCustData(updatedList); setLocalData(conf.key, updatedList); setIsCustModalOpen(false);
 
     try {
-        if (editingCust) {
-            await updateDoc(getDocPath(conf.key, editingCust.id), payload);
-        } else {
-            await setDoc(getDocPath(conf.key, payload.id), payload);
-        }
+        if (editingCust) await updateDoc(getDocPath(conf.key, editingCust.id), payload);
+        else await setDoc(getDocPath(conf.key, payload.id), payload);
     } catch(err) {}
   };
 
@@ -1464,78 +1558,106 @@ const AdminPanel = ({ onNavigateHome }) => {
     if (!canManageCredentials) return;
     const cleanName = newUserName.trim();
     const cleanUser = newUserUser.trim().toLowerCase();
-    const cleanPwd = newUserPwd.trim();
-    if (!cleanName || !cleanUser || !cleanPwd) return setUserAddError('Nama, username, dan password wajib diisi.');
+    if (!cleanName || !cleanUser) return setUserAddError('Nama dan username wajib diisi.');
     
     const safeAllUsers = Array.isArray(allUsers) ? allUsers : [];
-    if (safeAllUsers.some(u => u.username?.toLowerCase() === cleanUser && u.id !== editingUser?.id)) {
-      return setUserAddError(`Username "@${cleanUser}" sudah digunakan!`);
-    }
+    if (safeAllUsers.some(u => u.username?.toLowerCase() === cleanUser && u.id !== editingUser?.id)) return setUserAddError(`Username "@${cleanUser}" sudah digunakan!`);
 
     const userId = editingUser ? editingUser.id : ('usr_' + Date.now());
     const newUserObj = {
-      id: userId, 
-      name: cleanName, 
-      username: cleanUser, 
-      password: cleanPwd, 
-      role: newUserRole,
+      id: userId, name: cleanName, username: cleanUser, role: newUserRole,
       divisions: ['SUPER_ADMIN', 'MANAGEMENT'].includes(newUserRole) ? ['TANDON', 'GALLON', 'MOBIL_TANGKI', 'AIR_KAPAL', 'GAS_INDUSTRI'] : newUserDivs,
-      isActive: editingUser ? (editingUser.isActive ?? true) : true, 
-      createdAt: editingUser ? editingUser.createdAt : Date.now()
+      isActive: editingUser ? (editingUser.isActive ?? true) : true, createdAt: editingUser ? editingUser.createdAt : Date.now()
     };
+    if (!editingUser) newUserObj.password = suggestedPwd || generateSecurePassword(cleanUser);
 
-    const updated = editingUser
-      ? safeAllUsers.map(u => u.id === editingUser.id ? newUserObj : u)
-      : [...safeAllUsers, newUserObj];
-
-    setAllUsers(updated); 
-    setLocalData('all_users', updated);
-    setIsAddUserOpen(false);
-    setEditingUser(null);
-    setNewUserName(''); setNewUserUser(''); setNewUserPwd('123456'); setNewUserRole('OPERATOR'); setNewUserDivs(['TANDON']); setUserAddError('');
+    const updated = editingUser ? safeAllUsers.map(u => u.id === editingUser.id ? { ...u, ...newUserObj } : u) : [...safeAllUsers, newUserObj];
+    setAllUsers(updated); setLocalData('all_users', updated); setIsAddUserOpen(false); setEditingUser(null);
+    setNewUserName(''); setNewUserUser(''); setSuggestedPwd(''); setNewUserRole('OPERATOR'); setNewUserDivs(['TANDON']); setUserAddError('');
     
     try { 
-      await setDoc(getDocPath('users', userId), newUserObj); 
+      if (editingUser) await updateDoc(getDocPath('users', userId), newUserObj);
+      else await setDoc(getDocPath('users', userId), newUserObj); 
     } catch(e) {}
   };
 
   const openEditUser = (u) => {
-    setEditingUser(u);
-    setNewUserName(u.name || '');
-    setNewUserUser(u.username || '');
-    setNewUserPwd(u.password || '123456');
-    setNewUserRole(u.role || 'OPERATOR');
-    setNewUserDivs(u.divisions || ['TANDON']);
-    setUserAddError('');
-    setIsAddUserOpen(true);
+    setEditingUser(u); setNewUserName(u.name || ''); setNewUserUser(u.username || ''); setSuggestedPwd(''); 
+    setNewUserRole(u.role || 'OPERATOR'); setNewUserDivs(u.divisions || ['TANDON']); setUserAddError(''); setIsAddUserOpen(true);
   };
 
   const togglePortalAccess = async (cust) => {
     if (!canManageCredentials) return;
     const conf = custConfigs[activeCustTab];
-    const newStatus = cust.portalAccessEnabled === false ? true : false;
+    const isCurrentlyEnabled = cust.portalAccessEnabled === true;
+    const newStatus = !isCurrentlyEnabled;
+
+    if (newStatus && (!cust.username || !cust.password)) {
+      const nameVal = cust[conf.nameField] || '';
+      const defUser = generateUniqueUsername(nameVal, custData, conf.nameField, cust.id);
+      setCredentialPromptTarget({ cust, confKey: conf.key });
+      setPromptUsername(defUser);
+      setPromptPassword(generateSecurePassword(defUser));
+      setPromptError('');
+      return;
+    }
+
     const updated = custData.map(c => c.id === cust.id ? { ...c, portalAccessEnabled: newStatus } : c);
     setCustData(updated); setLocalData(conf.key, updated);
     try { await updateDoc(getDocPath(conf.key, cust.id), { portalAccessEnabled: newStatus }); } catch(e) {}
   };
 
+  const handleCredentialPromptSubmit = async (e) => {
+    e.preventDefault();
+    if (!credentialPromptTarget) return;
+    const { cust, confKey } = credentialPromptTarget;
+    const cleanUser = promptUsername.trim().toLowerCase();
+    const cleanPwd = promptPassword.trim();
+    if (!cleanUser || !cleanPwd) return setPromptError('Username dan password wajib diisi.');
+
+    const payload = {
+      username: cleanUser,
+      password: cleanPwd,
+      portalAccessEnabled: true,
+      updatedAt: Date.now()
+    };
+
+    const updated = custData.map(c => c.id === cust.id ? { ...c, ...payload } : c);
+    setCustData(updated); setLocalData(confKey, updated);
+    setCredentialPromptTarget(null);
+
+    try {
+      await updateDoc(getDocPath(confKey, cust.id), payload);
+    } catch(err) {}
+  };
+
   const handleResetSubmit = async (e) => {
     e.preventDefault();
-    if (!canManageCredentials || !resetTarget) return;
-    const conf = custConfigs[activeCustTab];
-    const updated = custData.map(c => c.id === resetTarget.id ? { ...c, password: resetPwd } : c);
-    
-    setCustData(updated); setLocalData(conf.key, updated);
+    if (!canResetPassword || !resetTarget) return;
+
     try {
-      await updateDoc(getDocPath(conf.key, resetTarget.id), { password: resetPwd });
-      setResetMsg('Password berhasil diubah!');
+      if (resetTarget.type === 'USER') {
+        const updated = allUsers.map(u => u.id === resetTarget.data.id ? { ...u, password: resetPwd } : u);
+        setAllUsers(updated); setLocalData('all_users', updated);
+        await updateDoc(getDocPath('users', resetTarget.data.id), { password: resetPwd });
+      } else {
+        const confKey = resetTarget.confKey;
+        if (!confKey) throw new Error("Database reference missing");
+        
+        const updated = custData.map(c => c.id === resetTarget.data.id ? { ...c, password: resetPwd } : c);
+        setCustData(updated); setLocalData(confKey, updated);
+        await updateDoc(getDocPath(confKey, resetTarget.data.id), { password: resetPwd });
+      }
+      setResetMsg('Password diubah!');
       setTimeout(() => { setResetTarget(null); setResetMsg(''); }, 1500);
-    } catch(err) { setResetMsg('Gagal mengubah password.'); }
+    } catch (err) {
+      console.error(err);
+      setResetMsg('Gagal mengubah.');
+    }
   };
 
   const currConf = custConfigs[activeCustTab];
   const activeFormLabel = activeCustTab === 'TANDON' ? 'Nama Supir' : activeCustTab === 'KAPAL' ? 'Nama Kapal' : 'Nama Pembeli';
-  
   const filteredCustData = custData.filter(c => {
     const term = searchCust.toLowerCase();
     const nm = (c[currConf.nameField] || '').toLowerCase();
@@ -1556,9 +1678,9 @@ const AdminPanel = ({ onNavigateHome }) => {
       </div>
       
       <div className="grid grid-cols-3 gap-1.5 bg-emerald-100/50 p-1 rounded-2xl text-xs font-extrabold border border-emerald-100">
-        <button onClick={()=>setActiveCategory('INTERNAL')} className={`py-3 rounded-xl transition-all ${activeCategory==='INTERNAL'?'bg-emerald-600 text-white shadow-md':'text-emerald-700'}`}>Internal</button>
-        <button onClick={()=>setActiveCategory('CUSTOMER')} className={`py-3 rounded-xl transition-all ${activeCategory==='CUSTOMER'?'bg-emerald-600 text-white shadow-md':'text-emerald-700'}`}>Customer / Akun</button>
-        <button onClick={()=>setActiveCategory('PRICING')} className={`py-3 rounded-xl transition-all ${activeCategory==='PRICING'?'bg-emerald-600 text-white shadow-md':'text-emerald-700'}`}>Master Harga</button>
+        <button onClick={()=>setActiveCategory('INTERNAL')} className={`py-3 rounded-xl transition-all cursor-pointer ${activeCategory==='INTERNAL'?'bg-emerald-600 text-white shadow-md':'text-emerald-700'}`}>Internal</button>
+        <button onClick={()=>setActiveCategory('CUSTOMER')} className={`py-3 rounded-xl transition-all cursor-pointer ${activeCategory==='CUSTOMER'?'bg-emerald-600 text-white shadow-md':'text-emerald-700'}`}>Customer / Akun</button>
+        <button onClick={()=>setActiveCategory('PRICING')} className={`py-3 rounded-xl transition-all cursor-pointer ${activeCategory==='PRICING'?'bg-emerald-600 text-white shadow-md':'text-emerald-700'}`}>Master Harga</button>
       </div>
       
       {activeCategory === 'INTERNAL' && (
@@ -1566,7 +1688,17 @@ const AdminPanel = ({ onNavigateHome }) => {
           <div className="flex justify-between items-center border-b border-emerald-50 pb-2">
             <h3 className="font-black text-sm text-emerald-900">Manajemen User Staf</h3>
             {canManageCredentials && (
-              <Button onClick={()=>{setEditingUser(null); setNewUserName(''); setNewUserUser(''); setNewUserPwd('123456'); setNewUserRole('OPERATOR'); setNewUserDivs(['TANDON']); setIsAddUserOpen(true); setUserAddError('');}} variant="emerald" className="py-1.5 px-3 text-xs"><Plus size={14}/> Tambah Staf</Button>
+              <Button onClick={()=>{
+                setEditingUser(null); 
+                setNewUserName(''); 
+                setNewUserUser(''); 
+                const defU = generateUniqueUsername('staf', allUsers, 'username');
+                setSuggestedPwd(generateSecurePassword(defU)); 
+                setNewUserRole('OPERATOR'); 
+                setNewUserDivs(['TANDON']); 
+                setIsAddUserOpen(true); 
+                setUserAddError('');
+              }} variant="emerald" className="py-1.5 px-3 text-xs"><Plus size={14}/> Tambah Staf</Button>
             )}
           </div>
           <div className="space-y-2 max-h-96 overflow-y-auto">
@@ -1577,9 +1709,12 @@ const AdminPanel = ({ onNavigateHome }) => {
                   <p className="text-[10px] text-emerald-600">@{u.username} {u.divisions && `• Div: ${u.divisions.join(', ')}`}</p>
                 </div>
                 {canManageCredentials && (
-                  <button onClick={()=>openEditUser(u)} title="Edit Staf" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer transition-colors">
-                    <Edit size={15}/>
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={()=>openEditUser(u)} title="Edit Staf" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Edit size={15}/></button>
+                    {canResetPassword && (
+                      <button onClick={()=>{setResetTarget({data: u, type: 'USER'}); setResetPwd(generateSecurePassword(u.username)); setResetMsg('');}} title="Reset Password" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Key size={15}/></button>
+                    )}
+                  </div>
                 )}
               </div>
             ))}
@@ -1590,11 +1725,11 @@ const AdminPanel = ({ onNavigateHome }) => {
       {activeCategory === 'CUSTOMER' && (
         <Card className="p-4 space-y-4 border-emerald-100">
           <div className="flex gap-2 border-b border-emerald-50 pb-3 overflow-x-auto text-[11px] font-bold">
-            <button onClick={()=>setActiveCustTab('TANDON')} className={`px-3 py-1.5 rounded-lg whitespace-nowrap ${activeCustTab==='TANDON'?'bg-emerald-600 text-white':'bg-emerald-50 text-emerald-700'}`}>Sopir Tandon</button>
-            <button onClick={()=>setActiveCustTab('TANGKI')} className={`px-3 py-1.5 rounded-lg whitespace-nowrap ${activeCustTab==='TANGKI'?'bg-emerald-600 text-white':'bg-emerald-50 text-emerald-700'}`}>Pelanggan Tangki</button>
-            <button onClick={()=>setActiveCustTab('GALLON')} className={`px-3 py-1.5 rounded-lg whitespace-nowrap ${activeCustTab==='GALLON'?'bg-emerald-600 text-white':'bg-emerald-50 text-emerald-700'}`}>Pelanggan Galon</button>
-            <button onClick={()=>setActiveCustTab('KAPAL')} className={`px-3 py-1.5 rounded-lg whitespace-nowrap ${activeCustTab==='KAPAL'?'bg-emerald-600 text-white':'bg-emerald-50 text-emerald-700'}`}>Kapal / Agen</button>
-            <button onClick={()=>setActiveCustTab('GAS')} className={`px-3 py-1.5 rounded-lg whitespace-nowrap ${activeCustTab==='GAS'?'bg-emerald-600 text-white':'bg-emerald-50 text-emerald-700'}`}>Gas Industri</button>
+            <button onClick={()=>setActiveCustTab('TANDON')} className={`px-3 py-1.5 rounded-lg whitespace-nowrap cursor-pointer ${activeCustTab==='TANDON'?'bg-emerald-600 text-white':'bg-emerald-50 text-emerald-700'}`}>Sopir Tandon</button>
+            <button onClick={()=>setActiveCustTab('TANGKI')} className={`px-3 py-1.5 rounded-lg whitespace-nowrap cursor-pointer ${activeCustTab==='TANGKI'?'bg-emerald-600 text-white':'bg-emerald-50 text-emerald-700'}`}>Pelanggan Tangki</button>
+            <button onClick={()=>setActiveCustTab('GALLON')} className={`px-3 py-1.5 rounded-lg whitespace-nowrap cursor-pointer ${activeCustTab==='GALLON'?'bg-emerald-600 text-white':'bg-emerald-50 text-emerald-700'}`}>Pelanggan Galon</button>
+            <button onClick={()=>setActiveCustTab('KAPAL')} className={`px-3 py-1.5 rounded-lg whitespace-nowrap cursor-pointer ${activeCustTab==='KAPAL'?'bg-emerald-600 text-white':'bg-emerald-50 text-emerald-700'}`}>Kapal / Agen</button>
+            <button onClick={()=>setActiveCustTab('GAS')} className={`px-3 py-1.5 rounded-lg whitespace-nowrap cursor-pointer ${activeCustTab==='GAS'?'bg-emerald-600 text-white':'bg-emerald-50 text-emerald-700'}`}>Gas Industri</button>
           </div>
           
           <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
@@ -1611,20 +1746,20 @@ const AdminPanel = ({ onNavigateHome }) => {
           </div>
           
           <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-            {filteredCustData.length === 0 ? (
-              <p className="text-xs text-emerald-600 text-center py-6 italic">Belum ada data akun.</p>
-            ) : (
+            {filteredCustData.length === 0 ? <p className="text-xs text-emerald-600 text-center py-6 italic">Belum ada data akun.</p> : (
               filteredCustData.map(c => {
                 const nameKey = custConfigs[activeCustTab].nameField;
-                const isEnabled = c.portalAccessEnabled !== false;
-                const activeMasterPrice = activeCustTab === 'GAS' ? 150000 : (prices[custConfigs[activeCustTab].priceKey] || 0);
-                
+                const isEnabled = c.portalAccessEnabled === true;
+                const activeMasterPrice = activeCustTab === 'GAS' ? 150000 : (prices[custConfigs[activeCustTab].priceKey] ?? 0);
                 let displayPriceText = "";
                 if (activeCustTab === 'GAS') {
                   const hasCustom = c.gasCustomPrices && Object.keys(c.gasCustomPrices).length > 0;
                   displayPriceText = hasCustom ? "Beberapa Kustom (Sisanya Master)" : "Full Ikut Master";
                 } else {
-                  displayPriceText = (c.price && Number(c.price) > 0) ? `Rp ${Number(c.price).toLocaleString('id-ID')} (Khusus)` : `Rp ${activeMasterPrice.toLocaleString('id-ID')} (Master)`;
+                  const rawP = c.price;
+                  const hasCustP = rawP !== undefined && rawP !== null && rawP !== '';
+                  const numericP = Number(rawP);
+                  displayPriceText = hasCustP ? `Rp ${numericP.toLocaleString('id-ID')} ${numericP === 0 ? '(FOC)' : '(Khusus)'}` : `Rp ${activeMasterPrice.toLocaleString('id-ID')} (Master)`;
                 }
 
                 return (
@@ -1632,27 +1767,22 @@ const AdminPanel = ({ onNavigateHome }) => {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className="font-black uppercase text-emerald-900 truncate">{c[nameKey]}</span>
-                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${isEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                          {isEnabled ? 'Portal Aktif' : 'Portal Dinonaktifkan'}
-                        </span>
+                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${isEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>{isEnabled ? 'Portal Aktif' : 'Portal Dinonaktifkan'}</span>
                       </div>
                       {c.companyName && <p className="text-[10px] text-emerald-700 font-bold mt-0.5">PT: {c.companyName}</p>}
                       {c.agentName && <p className="text-[10px] text-emerald-700 font-bold mt-0.5">Agen: {c.agentName}</p>}
                       {c.customerType && <p className="text-[10px] text-emerald-700 font-bold mt-0.5">Tipe: {c.customerType} {c.resellerName && `- ${c.resellerName}`}</p>}
-                      <p className="text-[10px] text-emerald-600 font-mono mt-0.5">@{c.username} • Harga: {displayPriceText}</p>
-                      {c.address && <p className="text-[10px] text-slate-500 truncate mt-0.5">{c.address} {c.whatsapp && `• WA: ${c.whatsapp}`}</p>}
+                      <p className="text-[10px] text-emerald-600 font-mono mt-0.5">@{c.username || 'belum_ada_username'} • Harga: {displayPriceText}</p>
                     </div>
                     {canManageCredentials && (
                       <div className="flex items-center gap-1.5 shrink-0">
-                        <button onClick={() => openEditCust(c)} title="Edit Akun" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer transition-colors">
-                          <Edit size={15}/>
-                        </button>
+                        <button onClick={() => openEditCust(c)} title="Edit Akun" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Edit size={15}/></button>
                         <button onClick={()=>togglePortalAccess(c)} title={isEnabled ? "Nonaktifkan Portal" : "Aktifkan Portal"} className={`p-1.5 rounded-lg border text-xs font-bold cursor-pointer transition-colors ${isEnabled ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100' : 'bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-200'}`}>
                           {isEnabled ? <Ban size={15}/> : <Check size={15}/>}
                         </button>
-                        <button onClick={()=>{setResetTarget(c); setResetPwd('123456'); setResetMsg('');}} title="Reset Password" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer transition-colors">
-                          <Key size={15}/>
-                        </button>
+                        {canResetPassword && c.username && c.password && (
+                          <button onClick={()=>{setResetTarget({data: c, type: 'CUSTOMER', confKey: custConfigs[activeCustTab].key}); setResetPwd(generateSecurePassword(c.username)); setResetMsg('');}} title="Reset Password" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Key size={15}/></button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1667,32 +1797,19 @@ const AdminPanel = ({ onNavigateHome }) => {
         <Card className="p-4 space-y-4 border-emerald-100 max-h-[75vh] overflow-y-auto">
           <h3 className="font-black text-sm border-b border-emerald-50 pb-2 text-emerald-900">Master Harga Standar</h3>
           <div className="space-y-3">
-            {[
-              { id: 'TANDON', name: 'Air Tandon', conf: 'tandon_config' },
-              { id: 'GALLON', name: 'Air Gallon', conf: 'gallon_config' },
-              { id: 'TANGKI', name: 'Mobil Tangki', conf: 'tangki_config' },
-              { id: 'KAPAL', name: 'Air Kapal / Ton', conf: 'kapal_config' },
-            ].map(div => (
+            {[{ id: 'TANDON', name: 'Air Tandon', conf: 'tandon_config' }, { id: 'GALLON', name: 'Air Gallon', conf: 'gallon_config' }, { id: 'TANGKI', name: 'Mobil Tangki', conf: 'tangki_config' }, { id: 'KAPAL', name: 'Air Kapal / Ton', conf: 'kapal_config' }].map(div => (
               <div key={div.id} className="flex items-center justify-between p-3 border border-emerald-100 rounded-xl bg-emerald-50/50">
                 <span className="text-xs font-bold uppercase text-emerald-800">{div.name}</span>
                 <input type="number" value={prices[div.id]} onChange={e=>updatePrice(div.id, div.conf, e.target.value)} onWheel={(e) => e.target.blur()} disabled={!canManageCredentials} className="w-32 p-2 border border-emerald-200 rounded-lg text-sm font-black text-right outline-none focus:ring-2 focus:ring-emerald-500 text-emerald-900" />
               </div>
             ))}
-
             <div className="pt-2 border-t border-emerald-100">
               <h4 className="text-xs font-black uppercase text-orange-800 mb-2">Master Harga Gas Industri</h4>
               <div className="space-y-2">
                 {Object.entries(gasProducts).map(([prodName, prodPrice]) => (
                   <div key={prodName} className="flex items-center justify-between p-2.5 border border-orange-100 rounded-xl bg-orange-50/30">
                     <span className="text-xs font-bold text-orange-900">{prodName}</span>
-                    <input 
-                      type="number" 
-                      value={prodPrice} 
-                      onChange={e=>updateGasProductPrice(prodName, e.target.value)} 
-                      onWheel={(e) => e.target.blur()}
-                      disabled={!canManageCredentials} 
-                      className="w-32 p-2 border border-orange-200 rounded-lg text-sm font-black text-right outline-none focus:ring-2 focus:ring-orange-500 text-orange-900" 
-                    />
+                    <input type="number" value={prodPrice} onChange={e=>updateGasProductPrice(prodName, e.target.value)} onWheel={(e) => e.target.blur()} disabled={!canManageCredentials} className="w-32 p-2 border border-orange-200 rounded-lg text-sm font-black text-right outline-none focus:ring-2 focus:ring-orange-500 text-orange-900" />
                   </div>
                 ))}
               </div>
@@ -1707,50 +1824,46 @@ const AdminPanel = ({ onNavigateHome }) => {
           {userAddError && <div className="p-2 bg-red-50 text-red-700 text-xs font-bold rounded-lg">{userAddError}</div>}
           <div>
             <label className="text-[10px] font-bold uppercase text-slate-500">Nama Lengkap</label>
-            <input type="text" value={newUserName} onChange={e=>{setNewUserName(e.target.value); if(!editingUser) setNewUserUser(e.target.value.replace(/[^a-zA-Z0-9]/g,'').toLowerCase());}} placeholder="NAMA LENGKAP STAF" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold" required autoFocus />
+            <input type="text" value={newUserName} onChange={e=>{
+                const val = e.target.value; setNewUserName(val); 
+                if(!editingUser) { 
+                  const u = generateUniqueUsername(val, allUsers, 'username');
+                  setNewUserUser(u); setSuggestedPwd(generateSecurePassword(u));
+                }
+            }} placeholder="NAMA LENGKAP STAF" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold" required autoFocus />
           </div>
           <div>
             <label className="text-[10px] font-bold uppercase text-slate-500">Username Login</label>
-            <input type="text" value={newUserUser} onChange={e=>setNewUserUser(e.target.value)} placeholder="username" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold lowercase" required />
-          </div>
-          <div>
-            <label className="text-[10px] font-bold uppercase text-slate-500">Password</label>
-            <input type="text" value={newUserPwd} onChange={e=>setNewUserPwd(e.target.value)} placeholder="123456" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold" required />
+            <input type="text" value={newUserUser} onChange={e=>{
+                const u = e.target.value; setNewUserUser(u);
+                if (!editingUser) setSuggestedPwd(generateSecurePassword(u));
+            }} placeholder="username" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold lowercase" required />
           </div>
           <div>
             <label className="text-[10px] font-bold uppercase text-slate-500">Peran (Role)</label>
-            <select value={newUserRole} onChange={e=>setNewUserRole(e.target.value)} className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold">
-              <option value="OPERATOR">Operator</option>
-              <option value="SUPERVISOR">Supervisor</option>
-              <option value="ADMIN">Administrator</option>
-              <option value="MANAGEMENT">Management (Read-Only)</option>
-              <option value="SUPER_ADMIN">Super Administrator</option>
+            <select value={newUserRole} onChange={e=>setNewUserRole(e.target.value)} className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold cursor-pointer">
+              <option value="OPERATOR">Operator</option><option value="SUPERVISOR">Supervisor</option><option value="ADMIN">Administrator</option><option value="MANAGEMENT">Management (Read-Only)</option>
+              {sessionUser.role === 'SUPER_ADMIN' && <option value="SUPER_ADMIN">Super Administrator</option>}
             </select>
           </div>
           {newUserRole !== 'MANAGEMENT' && newUserRole !== 'SUPER_ADMIN' && (
             <div>
               <label className="text-[10px] font-bold uppercase text-slate-500 mb-1 block">Akses Divisi</label>
               <div className="grid grid-cols-2 gap-2 text-xs font-bold">
-                {[
-                  { id: 'TANDON', name: 'Air Tandon' },
-                  { id: 'GALLON', name: 'Air Gallon' },
-                  { id: 'MOBIL_TANGKI', name: 'Mobil Tangki' },
-                  { id: 'AIR_KAPAL', name: 'Air Kapal' },
-                  { id: 'GAS_INDUSTRI', name: 'Gas Industri' },
-                ].map(d => (
+                {[{ id: 'TANDON', name: 'Air Tandon' }, { id: 'GALLON', name: 'Air Gallon' }, { id: 'MOBIL_TANGKI', name: 'Mobil Tangki' }, { id: 'AIR_KAPAL', name: 'Air Kapal' }, { id: 'GAS_INDUSTRI', name: 'Gas Industri' }].map(d => (
                   <label key={d.id} className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg border cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      checked={newUserDivs.includes(d.id)}
-                      onChange={e => {
-                        if (e.target.checked) setNewUserDivs([...newUserDivs, d.id]);
-                        else setNewUserDivs(newUserDivs.filter(x => x !== d.id));
-                      }}
-                    />
+                    <input type="checkbox" checked={newUserDivs.includes(d.id)} onChange={e => { if (e.target.checked) setNewUserDivs([...newUserDivs, d.id]); else setNewUserDivs(newUserDivs.filter(x => x !== d.id)); }} />
                     <span>{d.name}</span>
                   </label>
                 ))}
               </div>
+            </div>
+          )}
+          {!editingUser && newUserName && (
+            <div className="pt-2 border-t mt-2">
+              <p className="text-[10px] font-bold text-emerald-700 uppercase">Saran Password Sementara:</p>
+              <p className="text-xs font-mono font-black text-slate-800 bg-emerald-50 p-2 rounded-lg border border-emerald-100">{suggestedPwd}</p>
+              <p className="text-[9px] text-slate-400 mt-1">Harap catat password ini, karena tidak akan ditampilkan lagi setelah disimpan.</p>
             </div>
           )}
           <Button type="submit" variant="emerald" className="w-full py-3">{editingUser ? "Simpan Perubahan Staf" : "Simpan Staf Baru"}</Button>
@@ -1760,35 +1873,33 @@ const AdminPanel = ({ onNavigateHome }) => {
       <Modal isOpen={isCustModalOpen} onClose={()=>setIsCustModalOpen(false)} title={editingCust ? `Edit ${currConf.label}` : `Tambah ${currConf.label}`}>
         <form onSubmit={handleSaveCustomer} className="space-y-3">
           {custError && <div className="p-2 bg-red-50 text-red-700 text-xs font-bold rounded-lg">{custError}</div>}
-          
           <div>
             <label className="text-[10px] font-bold uppercase text-slate-500">{activeFormLabel} (Wajib Unik)</label>
             <input type="text" value={custForm.name} onChange={e=>{
-                setCustForm({...custForm, name: e.target.value, username: e.target.value.replace(/[^a-zA-Z0-9]/g,'').toLowerCase()});
+                const val = e.target.value; 
+                const u = generateUniqueUsername(val, custData, currConf.nameField, editingCust?.id);
+                setCustForm(prev => ({ ...prev, name: val, username: u }));
+                if(!editingCust) setSuggestedPwd(generateSecurePassword(u));
             }} placeholder={`Masukkan ${activeFormLabel.toLowerCase()}...`} className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold uppercase" required autoFocus />
           </div>
-          
           {(activeCustTab === 'TANGKI' || activeCustTab === 'GAS') && (
             <div>
               <label className="text-[10px] font-bold uppercase text-slate-500">Nama PT (Opsional)</label>
               <input type="text" value={custForm.companyName} onChange={e=>setCustForm({...custForm, companyName: e.target.value})} placeholder="Nama PT / Perusahaan" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold uppercase" />
             </div>
           )}
-
           {activeCustTab === 'KAPAL' && (
             <div>
               <label className="text-[10px] font-bold uppercase text-slate-500">Nama Agen (Opsional)</label>
               <input type="text" value={custForm.agentName} onChange={e=>setCustForm({...custForm, agentName: e.target.value})} placeholder="Nama Agen Kapal" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold uppercase" />
             </div>
           )}
-
           {activeCustTab === 'GALLON' && (
             <div className="flex gap-2">
               <div className="flex-1">
                 <label className="text-[10px] font-bold uppercase text-slate-500">Tipe Pelanggan</label>
-                <select value={custForm.customerType} onChange={e=>setCustForm({...custForm, customerType: e.target.value})} className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold uppercase">
-                  <option value="PENGGUNA">Pengguna</option>
-                  <option value="RESELLER">Reseller</option>
+                <select value={custForm.customerType} onChange={e=>setCustForm({...custForm, customerType: e.target.value})} className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold uppercase cursor-pointer">
+                  <option value="PENGGUNA">Pengguna</option><option value="RESELLER">Reseller</option>
                 </select>
               </div>
               {custForm.customerType === 'RESELLER' && (
@@ -1799,7 +1910,6 @@ const AdminPanel = ({ onNavigateHome }) => {
               )}
             </div>
           )}
-
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="text-[10px] font-bold uppercase text-slate-500">Alamat</label>
@@ -1810,58 +1920,63 @@ const AdminPanel = ({ onNavigateHome }) => {
               <input type="text" value={custForm.whatsapp} onChange={e=>setCustForm({...custForm, whatsapp: e.target.value})} placeholder="08xxxxxxxxxx" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold" required={activeCustTab === 'TANDON'} />
             </div>
           </div>
-
           {activeCustTab === 'GAS' ? (
             <div className="pt-2 border-t border-emerald-100 mt-2">
               <label className="text-[10px] font-bold uppercase text-emerald-700 flex flex-col mb-2">
-                <span>Harga Khusus Per Produk (Rp)</span>
-                <span className="text-[9px] text-slate-400 normal-case font-normal">*Kosongkan kolom yang mengikuti Master Harga</span>
+                <span>Harga Khusus Per Produk (Rp)</span><span className="text-[9px] text-slate-400 normal-case font-normal">*Kosongkan kolom yang mengikuti Master Harga (0 untuk FOC)</span>
               </label>
               <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-1">
                 {Object.keys(gasProducts).map(prod => (
                   <div key={prod} className="flex flex-col bg-emerald-50/50 p-1.5 rounded-lg border border-emerald-100">
                     <span className="text-[9px] font-bold text-emerald-900 truncate mb-1">{prod}</span>
-                    <input
-                      type="number"
-                      value={custForm.gasCustomPrices[prod] || ''}
-                      onChange={e => setCustForm({...custForm, gasCustomPrices: {...custForm.gasCustomPrices, [prod]: e.target.value}})}
-                      onWheel={(e) => e.target.blur()}
-                      placeholder={(gasProducts[prod] || 0).toLocaleString('id-ID')}
-                      className="w-full p-1.5 bg-white border border-emerald-200 rounded text-xs font-black text-emerald-900 placeholder:text-emerald-300 placeholder:font-medium outline-none focus:ring-1 focus:ring-emerald-500"
-                    />
+                    <input type="number" value={custForm.gasCustomPrices[prod] !== undefined ? custForm.gasCustomPrices[prod] : ''} onChange={e => setCustForm({...custForm, gasCustomPrices: {...custForm.gasCustomPrices, [prod]: e.target.value}})} onWheel={(e) => e.target.blur()} placeholder={(gasProducts[prod] || 0).toLocaleString('id-ID')} className="w-full p-1.5 bg-white border border-emerald-200 rounded text-xs font-black text-emerald-900 placeholder:text-emerald-300 placeholder:font-medium outline-none focus:ring-1 focus:ring-emerald-500" />
                   </div>
                 ))}
               </div>
             </div>
           ) : (
             <div className="pt-2 border-t mt-2">
-              <label className="text-[10px] font-bold uppercase text-emerald-700 flex items-center justify-between">
-                Harga Khusus (Rp)
-                <span className="text-[9px] text-slate-400 normal-case font-normal">*Kosongkan untuk mengikuti Master Harga</span>
-              </label>
+              <label className="text-[10px] font-bold uppercase text-emerald-700 flex items-center justify-between">Harga Khusus (Rp)<span className="text-[9px] text-slate-400 normal-case font-normal">*Kosongkan untuk Master Harga (0 untuk FOC)</span></label>
               <input type="number" value={custForm.customPrice} onChange={e=>setCustForm({...custForm, customPrice: e.target.value})} onWheel={(e) => e.target.blur()} placeholder="Mengikuti Master Harga" className="w-full p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-sm font-black text-emerald-900 placeholder:text-emerald-400/70 placeholder:font-medium" />
             </div>
           )}
-
-          <div className="grid grid-cols-2 gap-2 pt-2 border-t">
-            <div>
-              <label className="text-[10px] font-bold uppercase text-slate-500">Username Login</label>
-              <input type="text" value={custForm.username} onChange={e=>setCustForm({...custForm, username: e.target.value})} placeholder="username" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold lowercase" required />
-            </div>
-            {!editingCust && canManageCredentials && (
-              <div>
-                <label className="text-[10px] font-bold uppercase text-slate-500">Password</label>
-                <input type="text" value={custForm.password} onChange={e=>setCustForm({...custForm, password: e.target.value})} placeholder="123456" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold" required />
-              </div>
-            )}
+          <div className="pt-2 border-t mt-2">
+            <label className="text-[10px] font-bold uppercase text-slate-500">Username Login</label>
+            <input type="text" value={custForm.username} onChange={e=>{
+                const u = e.target.value; setCustForm(prev => ({ ...prev, username: u }));
+                if(!editingCust) setSuggestedPwd(generateSecurePassword(u));
+            }} placeholder="username" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold lowercase" required />
           </div>
+          {!editingCust && custForm.name && (
+            <div className="pt-1 mt-1">
+              <p className="text-[10px] font-bold text-emerald-700 uppercase">Saran Password Sementara:</p>
+              <p className="text-xs font-mono font-black text-slate-800 bg-emerald-50 p-2 rounded-lg border border-emerald-100">{suggestedPwd}</p>
+              <p className="text-[9px] text-slate-400 mt-1">Harap catat password ini, karena tidak akan ditampilkan lagi setelah disimpan.</p>
+            </div>
+          )}
           <Button type="submit" variant="emerald" className="w-full py-3">{editingCust ? 'Simpan Perubahan' : 'Simpan Data & Akun'}</Button>
+        </form>
+      </Modal>
+
+      <Modal isOpen={!!credentialPromptTarget} onClose={()=>setCredentialPromptTarget(null)} title="Buat Kredensial Portal Pelanggan">
+        <form onSubmit={handleCredentialPromptSubmit} className="space-y-4">
+          <p className="text-xs font-bold text-slate-600">Pelanggan ini belum memiliki username/password. Silakan buatkan kredensial untuk mengaktifkan portal mereka:</p>
+          {promptError && <div className="p-2 bg-red-50 text-red-700 text-xs font-bold rounded-lg">{promptError}</div>}
+          <div>
+            <label className="text-[10px] font-bold uppercase text-slate-500">Username</label>
+            <input type="text" value={promptUsername} onChange={e=>setPromptUsername(e.target.value)} placeholder="username" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold lowercase" required autoFocus />
+          </div>
+          <div>
+            <label className="text-[10px] font-bold uppercase text-slate-500">Password</label>
+            <input type="text" value={promptPassword} onChange={e=>setPromptPassword(e.target.value)} placeholder="password" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold" required />
+          </div>
+          <Button type="submit" variant="emerald" className="w-full py-3 shadow-md">Aktifkan Portal & Simpan Kredensial</Button>
         </form>
       </Modal>
 
       <Modal isOpen={!!resetTarget} onClose={()=>{setResetTarget(null); setResetMsg('');}} title={`Reset Password`}>
         <form onSubmit={handleResetSubmit} className="space-y-4">
-          <p className="text-xs font-bold text-slate-600">Username: <span className="text-emerald-700">@{resetTarget?.username}</span></p>
+          <p className="text-xs font-bold text-slate-600">Username: <span className="text-emerald-700">@{resetTarget?.data?.username}</span></p>
           <div>
             <label className="text-[10px] font-bold uppercase text-slate-500">Password Baru</label>
             <input type="text" value={resetPwd} onChange={e=>setResetPwd(e.target.value)} placeholder="Masukkan password baru" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold" required autoFocus />
@@ -1915,10 +2030,7 @@ const DivisionSelector = ({ user, onSelectDivision }) => {
       {['ADMIN', 'SUPER_ADMIN', 'SUPERVISOR', 'MANAGEMENT'].includes(user.role) && (
         <div className="pt-2 space-y-2">
           <Card onClick={()=>onSelectDivision('REPORTS')} className="p-4 border-2 border-emerald-200 bg-emerald-50 text-emerald-700 flex items-center justify-between cursor-pointer hover:shadow-md">
-            <div className="flex items-center gap-3">
-              <div className="p-3 rounded-xl bg-white"><PieChart size={24}/></div>
-              <h4 className="font-extrabold text-sm uppercase">Laporan POS</h4>
-            </div><ChevronRight size={18}/>
+            <div className="flex items-center gap-3"><div className="p-3 rounded-xl bg-white"><PieChart size={24}/></div><h4 className="font-extrabold text-sm uppercase">Laporan POS</h4></div><ChevronRight size={18}/>
           </Card>
           {['ADMIN', 'SUPER_ADMIN'].includes(user.role) && (
             <Button variant="emerald" onClick={()=>onSelectDivision('ADMIN')} className="w-full py-3.5 shadow-emerald-500/30"><Settings size={18}/> Panel Admin</Button>
@@ -1929,37 +2041,24 @@ const DivisionSelector = ({ user, onSelectDivision }) => {
   );
 };
 
-const DriverPortal = ({ user, logout }) => (
-  <div className="min-h-screen bg-slate-100 p-4">
-    <div className="max-w-md mx-auto space-y-4">
-      <div className="bg-emerald-700 text-white p-4 rounded-2xl shadow-xl flex justify-between items-center">
-        <div>
-          <span className="text-[10px] font-bold text-emerald-200">PORTAL {user.role}</span>
-          <h2 className="font-black uppercase text-lg">{user.name}</h2>
-        </div>
-        <button onClick={logout} className="p-2 bg-emerald-800 rounded-lg hover:bg-emerald-900"><LogOut size={16}/></button>
-      </div>
-      <Card className="p-6 text-center text-slate-500 border-dashed border-2">
-        <p className="text-sm font-bold">Riwayat Pembelian & Data Analitik Anda akan tampil di sini.</p>
-      </Card>
-    </div>
-  </div>
-);
-
 const MainApp = () => {
   const { sessionUser, logout, systemInitialized } = useContext(AuthContext);
   const [currentView, setCurrentView] = useState('HOME');
+  
   useEffect(() => { setCurrentView('HOME'); }, [sessionUser?.id]);
 
   if (!systemInitialized) return <SystemInitScreen />;
   if (!sessionUser) return <LoginScreen />;
-  if (['DRIVER', 'CUSTOMER_TANGKI', 'CUSTOMER_GALLON', 'CUSTOMER_KAPAL', 'CUSTOMER_GAS'].includes(sessionUser.role)) return <DriverPortal user={sessionUser} logout={logout} />;
+  
+  if (['DRIVER', 'CUSTOMER_TANGKI', 'CUSTOMER_GALLON', 'CUSTOMER_KAPAL', 'CUSTOMER_GAS'].includes(sessionUser.role)) {
+    return <CustomerPortal user={sessionUser} logout={logout} />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 font-sans">
       <header className="bg-white border-b border-slate-200 sticky top-0 z-40 px-4 py-3 flex justify-between items-center shadow-xs">
         <GalanganKalimasLogo size="sm" />
-        <button onClick={logout} className="p-2 bg-red-50 text-red-600 rounded-xl shadow-xs"><LogOut size={16} /></button>
+        <button onClick={logout} className="p-2 bg-red-50 text-red-600 rounded-xl shadow-xs cursor-pointer"><LogOut size={16} /></button>
       </header>
       <main>
         {currentView === 'HOME' && <DivisionSelector user={sessionUser} onSelectDivision={setCurrentView} />}
