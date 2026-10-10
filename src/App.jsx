@@ -27,7 +27,6 @@ const firebaseConfig = {
   measurementId: "G-TSSC1J1S0D"
 };
 
-
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -87,6 +86,15 @@ const generateSecurePassword = (baseStr = 'user') => {
   const special = chars[Math.floor(Math.random() * chars.length)];
   const nums = String(Math.floor(Math.random() * 900 + 100));
   return `${cleanBase || 'user'}${special}${nums}`;
+};
+
+const getEffectivePrice = (customPrice, globalPrice) => {
+  if (customPrice === 0 || customPrice === '0') return 0;
+  if (customPrice === undefined || customPrice === null || customPrice === '' || String(customPrice).trim() === '') {
+    return Number(globalPrice) > 0 ? Number(globalPrice) : 20000;
+  }
+  const parsed = Number(customPrice);
+  return isNaN(parsed) ? (Number(globalPrice) > 0 ? Number(globalPrice) : 20000) : parsed;
 };
 
 class ErrorBoundary extends React.Component {
@@ -386,7 +394,6 @@ const CustomerPortal = ({ user, logout }) => {
   const [allTx, setAllTx] = useState(() => getLocalData('transactions', []));
   const [selectedDate, setSelectedDate] = useState(() => getMakassarDateString());
   const [selectedGraphDate, setSelectedGraphDate] = useState(() => getMakassarDateString());
-  const [graphView, setGraphView] = useState('MONTH'); 
   const [zoomedDate, setZoomedDate] = useState(null);
 
   useEffect(() => { 
@@ -414,8 +421,7 @@ const CustomerPortal = ({ user, logout }) => {
         return parts;
       }
     } catch(e){}
-    const fallbackParts = getMakassarDateString().split('-').map(Number);
-    return fallbackParts;
+    return getMakassarDateString().split('-').map(Number);
   }, [safeDateStr]);
 
   const currentDateObj = useMemo(() => {
@@ -449,15 +455,6 @@ const CustomerPortal = ({ user, logout }) => {
   const weeklyVol = weeklyTx.reduce((s, t) => s + (t.quantity || 1), 0);
   const monthlyVol = monthlyTx.reduce((s, t) => s + (t.quantity || 1), 0);
 
-  const weeklyData = useMemo(() => {
-    return ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'].map((name, i) => {
-      const td = new Date(monday); td.setDate(monday.getDate() + i);
-      const ds = formatD(td);
-      const dayTx = myTx.filter(t => t.dateStr === ds);
-      return { name, ds, vol: dayTx.reduce((s, t) => s + (t.quantity || 1), 0) };
-    });
-  }, [monday, myTx]);
-
   const monthData = useMemo(() => {
     try {
       const daysInMonth = new Date(dateParts[0], dateParts[1], 0).getDate();
@@ -472,11 +469,10 @@ const CustomerPortal = ({ user, logout }) => {
   }, [dateParts, myTx]);
 
   const maxGraphVol = useMemo(() => {
-    const list = graphView === 'WEEK' ? weeklyData : monthData;
-    if (!Array.isArray(list) || list.length === 0) return 5;
-    const max = Math.max(...list.map(d => d.vol || 0), 5);
+    if (!Array.isArray(monthData) || monthData.length === 0) return 5;
+    const max = Math.max(...monthData.map(d => d.vol || 0), 5);
     return isNaN(max) ? 5 : max;
-  }, [graphView, weeklyData, monthData]);
+  }, [monthData]);
 
   return (
     <div className="min-h-screen bg-slate-100 font-sans">
@@ -491,13 +487,13 @@ const CustomerPortal = ({ user, logout }) => {
       <main className="max-w-md sm:max-w-xl mx-auto p-4 space-y-4 pb-20">
         <Card className="p-4 space-y-4">
           <div className="flex flex-col gap-1.5 pb-3 border-b border-slate-100">
-            <label className="text-xs font-extrabold text-slate-700 uppercase flex items-center gap-1.5"><Calendar size={14} className={theme.txt}/> Pilih Tanggal (Acuan Ringkasan)</label>
-            <input type="date" value={safeDateStr} onChange={e=>setSelectedDate(e.target.value || getMakassarDateString())} className="p-2.5 w-full bg-slate-50 border border-slate-200 rounded-xl text-sm font-black outline-none focus:ring-2 focus:ring-emerald-500 shadow-inner" />
+            <label className="text-xs font-extrabold text-slate-700 uppercase flex items-center gap-1.5"><Calendar size={14} className={theme.txt}/> Pilih Tanggal / Bulan</label>
+            <input type="date" value={safeDateStr} onChange={e=>setSelectedDate(e.target.value || getMakassarDateString())} className="p-2.5 w-full bg-slate-50 border border-slate-200 rounded-xl text-sm font-black outline-none focus:ring-2 focus:ring-emerald-500 shadow-inner" onWheel={(e)=>e.target.blur()} />
           </div>
 
           <div className="grid grid-cols-3 gap-2">
              <div className={`p-2 rounded-xl text-center border shadow-sm ${theme.light} ${theme.border}`}>
-                <p className="text-[9px] text-slate-500 uppercase font-bold mb-1 truncate">Hari Ini ({safeDateStr})</p>
+                <p className="text-[9px] text-slate-500 uppercase font-bold mb-1 truncate">Hari ({safeDateStr})</p>
                 <p className={`text-sm font-black ${theme.txt}`}>{dailyVol} <span className="text-[9px] font-medium">{theme.label}</span></p>
              </div>
              <div className={`p-2 rounded-xl text-center border shadow-sm ${theme.light} ${theme.border}`}>
@@ -513,53 +509,34 @@ const CustomerPortal = ({ user, logout }) => {
 
         <Card className="p-4 space-y-3">
           <div className="flex justify-between items-center pb-2 border-b border-slate-100">
-            <h3 className="font-extrabold text-xs uppercase flex items-center gap-1.5 text-slate-800"><BarChart2 size={15} className={theme.txt}/> Grafik Volume</h3>
-            <div className="flex bg-slate-100 p-0.5 rounded-lg text-[9px] font-bold">
-              <button onClick={() => setGraphView('WEEK')} className={`px-2 py-1.5 rounded transition-colors cursor-pointer ${graphView === 'WEEK' ? 'bg-white shadow-xs text-slate-800' : 'text-slate-500'}`}>Mingguan</button>
-              <button onClick={() => setGraphView('MONTH')} className={`px-2 py-1.5 rounded transition-colors cursor-pointer ${graphView === 'MONTH' ? 'bg-white shadow-xs text-slate-800' : 'text-slate-500'}`}>Bulanan</button>
-            </div>
+            <h3 className="font-extrabold text-xs uppercase flex items-center gap-1.5 text-slate-800"><BarChart2 size={15} className={theme.txt}/> Grafik Volume Bulanan</h3>
+            <span className="text-[10px] font-bold text-slate-500">{monthPrefix}</span>
           </div>
           
           <div className="pt-6 pb-3 px-1 bg-slate-50 rounded-xl border border-slate-200">
-            {graphView === 'MONTH' ? (
-              <div className="flex w-full h-32 items-end justify-between px-1">
-                {monthData.map(m => {
-                  const hp = maxGraphVol > 0 ? Math.max((m.vol/maxGraphVol)*100, 3) : 3;
-                  const isSel = (selectedGraphDate || safeDateStr) === m.ds;
-                  const isZoomed = zoomedDate === m.ds;
-                  return (
-                    <div 
-                      key={m.day} 
-                      className="relative flex-1 h-full mx-[1px] flex flex-col justify-end items-center touch-none group cursor-pointer"
-                      onPointerDown={() => { setZoomedDate(m.ds); setSelectedGraphDate(m.ds); }}
-                      onPointerUp={() => setZoomedDate(null)}
-                      onPointerLeave={() => setZoomedDate(null)}
-                      onPointerCancel={() => setZoomedDate(null)}
-                    >
-                      {(isSel || isZoomed) && (
-                        <span className={`absolute -top-5 text-[10px] font-black z-30 ${theme.txt}`}>{m.vol}</span>
-                      )}
-                      <div className={`w-full rounded-t-sm transition-transform duration-200 origin-bottom ${isZoomed ? 'scale-[2.5] z-20 shadow-md' : (isSel ? 'scale-[1.3] z-10 opacity-100 shadow-sm' : 'opacity-40 group-hover:opacity-70')} ${theme.bg}`} style={{height:`${hp}%`}}></div>
-                      {isZoomed && <span className="absolute -bottom-5 text-[9px] font-bold text-slate-700 bg-white px-1 shadow-sm rounded z-30">{m.day}</span>}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="flex w-full h-32 items-end justify-around px-2 gap-1">
-                {weeklyData.map(w => {
-                  const hp = maxGraphVol > 0 ? Math.max((w.vol/maxGraphVol)*100, 4) : 4;
-                  const isSel = (selectedGraphDate || safeDateStr) === w.ds;
-                  return (
-                    <div key={w.ds} onClick={() => setSelectedGraphDate(w.ds)} className="relative flex-1 max-w-[40px] h-full flex flex-col justify-end items-center cursor-pointer group">
-                      <span className={`text-[10px] font-black mb-1 transition-all ${isSel ? theme.txt : 'text-slate-400 opacity-0 group-hover:opacity-100'}`}>{w.vol}</span>
-                      <div className={`w-full rounded-t-lg transition-all ${isSel ? `opacity-100 shadow-md ${theme.bg}` : `opacity-40 group-hover:opacity-70 ${theme.bg}`}`} style={{height:`${hp}%`}}></div>
-                      <span className={`text-[9px] font-bold mt-1 ${isSel ? 'text-slate-900' : 'text-slate-500'}`}>{w.name}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            <div className="flex w-full h-32 items-end justify-between px-1">
+              {monthData.map(m => {
+                const hp = maxGraphVol > 0 ? Math.max((m.vol/maxGraphVol)*100, 3) : 3;
+                const isSel = (selectedGraphDate || safeDateStr) === m.ds;
+                const isZoomed = zoomedDate === m.ds;
+                return (
+                  <div 
+                    key={m.day} 
+                    className="relative flex-1 h-full mx-[1px] flex flex-col justify-end items-center touch-none group cursor-pointer"
+                    onPointerDown={() => { setZoomedDate(m.ds); setSelectedGraphDate(m.ds); }}
+                    onPointerUp={() => setZoomedDate(null)}
+                    onPointerLeave={() => setZoomedDate(null)}
+                    onPointerCancel={() => setZoomedDate(null)}
+                  >
+                    {(isSel || isZoomed) && (
+                      <span className={`absolute -top-5 text-[10px] font-black z-30 ${theme.txt}`}>{m.vol}</span>
+                    )}
+                    <div className={`w-full rounded-t-sm transition-transform duration-200 origin-bottom ${isZoomed ? 'scale-[2.5] z-20 shadow-md' : (isSel ? 'scale-[1.3] z-10 opacity-100 shadow-sm' : 'opacity-40 group-hover:opacity-70')} ${theme.bg}`} style={{height:`${hp}%`}}></div>
+                    {isZoomed && <span className="absolute -bottom-5 text-[9px] font-bold text-slate-700 bg-white px-1 shadow-sm rounded z-30">{m.day}</span>}
+                  </div>
+                );
+              })}
+            </div>
           </div>
           <p className="text-[9px] text-center text-slate-400 mt-2 italic">Ketuk atau tahan bar pada grafik untuk melihat rincian tanggal.</p>
         </Card>
@@ -790,20 +767,10 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     if (dbKeys.divType === 'GAS_INDUSTRI') {
       activeGasProd = customerGasSelections[entity.id] || Object.keys(gasMasterConfig)[0] || 'Oxygen, 6 m³';
       const customGas = entity.gasCustomPrices?.[activeGasProd];
-      const hasValidCustomGas = customGas !== undefined && customGas !== null && customGas !== '' && !isNaN(Number(customGas));
-      if (hasValidCustomGas) {
-        unitPrice = Number(customGas);
-      } else {
-        unitPrice = gasMasterConfig[activeGasProd] || 150000;
-      }
+      const masterGasPrice = gasMasterConfig[activeGasProd] || 150000;
+      unitPrice = getEffectivePrice(customGas, masterGasPrice);
     } else {
-      const entPrice = entity.price;
-      const hasValidCustomPrice = entPrice !== undefined && entPrice !== null && entPrice !== '' && !isNaN(Number(entPrice));
-      if (hasValidCustomPrice) {
-        unitPrice = Number(entPrice);
-      } else {
-        unitPrice = globalPrice > 0 ? globalPrice : 20000;
-      }
+      unitPrice = getEffectivePrice(entity.price, globalPrice);
     }
 
     const txId = 'tx_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
@@ -855,7 +822,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
       address: newAddr.trim(), 
       whatsapp: newWa.trim(),
       portalAccessEnabled: false, 
-      price: '', // Blank means fallback to master price
+      price: '',
       gasCustomPrices: {}, 
       createdAt: Date.now()
     };
@@ -966,9 +933,9 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                 
                 if (dbKeys.divType === 'GAS_INDUSTRI') {
                   const currentGasProduct = customerGasSelections[ent.id] || Object.keys(gasMasterConfig)[0] || 'Oxygen, 6 m³';
-                  const customGasVal = ent.gasCustomPrices?.[currentGasProduct];
-                  const hasCustomGas = customGasVal !== undefined && customGasVal !== null && customGasVal !== '' && !isNaN(Number(customGasVal));
-                  const displayItemPrice = hasCustomGas ? Number(customGasVal) : (gasMasterConfig[currentGasProduct] || 150000);
+                  const masterGasPrice = gasMasterConfig[currentGasProduct] || 150000;
+                  const displayItemPrice = getEffectivePrice(ent.gasCustomPrices?.[currentGasProduct], masterGasPrice);
+                  const hasCustomGas = ent.gasCustomPrices?.[currentGasProduct] !== undefined && ent.gasCustomPrices?.[currentGasProduct] !== null && ent.gasCustomPrices?.[currentGasProduct] !== '';
                   const gasClasses = isActiveToday 
                     ? "flex flex-col p-3.5 rounded-2xl border bg-white border-orange-300 shadow-md ring-1 ring-orange-50 gap-2.5 transition-all"
                     : "flex flex-col p-3.5 rounded-2xl border bg-orange-50/40 border-orange-100 gap-2.5 hover:bg-orange-50/80 transition-all opacity-80 hover:opacity-100";
@@ -989,9 +956,9 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                           <select value={currentGasProduct} onChange={e => setCustomerGasSelections({...customerGasSelections, [ent.id]: e.target.value})} className="w-full p-2 bg-orange-50 border border-orange-200 rounded-xl text-[11px] font-black text-orange-950 outline-none focus:ring-2 focus:ring-orange-400 shadow-inner cursor-pointer">
                             {Object.keys(gasMasterConfig).map(gpName => {
                               const cGas = ent.gasCustomPrices?.[gpName];
-                              const isCust = cGas !== undefined && cGas !== null && cGas !== '' && !isNaN(Number(cGas));
-                              const price = isCust ? Number(cGas) : (gasMasterConfig[gpName] || 0);
-                              return <option key={gpName} value={gpName}>{gpName} - Rp {price.toLocaleString('id-ID')} {isCust ? '(Khusus)' : ''}</option>
+                              const p = getEffectivePrice(cGas, gasMasterConfig[gpName] || 0);
+                              const isCust = cGas !== undefined && cGas !== null && cGas !== '';
+                              return <option key={gpName} value={gpName}>{gpName} - Rp {p.toLocaleString('id-ID')} {isCust ? '(Khusus)' : ''}</option>
                             })}
                           </select>
                           <span className="text-[10px] text-orange-700 font-bold px-1">Harga: Rp {displayItemPrice.toLocaleString('id-ID')} {hasCustomGas ? (displayItemPrice===0 ? '(FOC)' : '(Khusus)') : '(Master)'}</span>
@@ -1002,9 +969,8 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                   );
                 }
 
-                const entPrice = ent.price;
-                const hasCustomPrice = entPrice !== undefined && entPrice !== null && entPrice !== '' && !isNaN(Number(entPrice));
-                const displayItemPrice = hasCustomPrice ? Number(entPrice) : (globalPrice > 0 ? globalPrice : 20000);
+                const displayItemPrice = getEffectivePrice(ent.price, globalPrice);
+                const hasCustomPrice = ent.price !== undefined && ent.price !== null && ent.price !== '' && String(ent.price).trim() !== '';
                 const nonGasClasses = isActiveToday
                   ? "flex justify-between items-center p-3 rounded-xl border bg-white border-slate-300 shadow-md ring-1 ring-slate-100 gap-2 transition-all"
                   : "flex justify-between items-center p-2.5 rounded-xl border bg-slate-50/70 border-slate-200 gap-2 opacity-80 hover:opacity-100 transition-all hover:bg-slate-100";
@@ -1251,19 +1217,19 @@ const ReportsModule = ({ user, onNavigateHome }) => {
               <button onClick={()=>setTodaySubMode('TODAY')} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${todaySubMode==='TODAY'?'bg-emerald-600 text-white':'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>Hari Ini</button>
               <button onClick={()=>setTodaySubMode('YESTERDAY')} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${todaySubMode==='YESTERDAY'?'bg-emerald-600 text-white':'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>Kemarin</button>
             </div>
-            <input type="date" value={activeDateStr} onChange={e=>{setSelectedDate(e.target.value || getMakassarDateString()); setTodaySubMode('CUSTOM');}} className="p-1.5 bg-slate-50 border rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500 outline-none" />
+            <input type="date" value={activeDateStr} onChange={e=>{setSelectedDate(e.target.value || getMakassarDateString()); setTodaySubMode('CUSTOM');}} className="p-1.5 bg-slate-50 border rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500 outline-none" onWheel={(e)=>e.target.blur()} />
           </div>
         )}
         {reportTab === 'WEEK' && (
           <div className="flex justify-between items-center pb-3 border-b border-slate-100">
             <span className="text-xs font-bold text-slate-700 uppercase">Pilih Tanggal (Acuan Minggu)</span>
-            <input type="date" value={selectedWeekDate || getMakassarDateString()} onChange={e=>setSelectedWeekDate(e.target.value || getMakassarDateString())} className="p-1.5 bg-slate-50 border rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500 outline-none" />
+            <input type="date" value={selectedWeekDate || getMakassarDateString()} onChange={e=>setSelectedWeekDate(e.target.value || getMakassarDateString())} className="p-1.5 bg-slate-50 border rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500 outline-none" onWheel={(e)=>e.target.blur()} />
           </div>
         )}
         {reportTab === 'MONTH' && (
           <div className="flex justify-between items-center pb-3 border-b border-slate-100">
             <span className="text-xs font-bold text-slate-700 uppercase">Pilih Bulan</span>
-            <input type="month" value={selectedMonthStr} onChange={e=>setSelectedMonthStr(e.target.value)} className="p-1.5 bg-slate-50 border rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500 outline-none" />
+            <input type="month" value={selectedMonthStr} onChange={e=>setSelectedMonthStr(e.target.value)} className="p-1.5 bg-slate-50 border rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500 outline-none" onWheel={(e)=>e.target.blur()} />
           </div>
         )}
 
@@ -1759,7 +1725,7 @@ const AdminPanel = ({ onNavigateHome }) => {
                   displayPriceText = hasCustom ? "Beberapa Kustom (Sisanya Master)" : "Full Ikut Master";
                 } else {
                   const rawP = c.price;
-                  const hasCustP = rawP !== undefined && rawP !== null && rawP !== '' && !isNaN(Number(rawP));
+                  const hasCustP = rawP !== undefined && rawP !== null && rawP !== '' && String(rawP).trim() !== '';
                   const numericP = Number(rawP);
                   displayPriceText = hasCustP ? `Rp ${numericP.toLocaleString('id-ID')} ${numericP === 0 ? '(FOC)' : '(Khusus)'}` : `Rp ${activeMasterPrice.toLocaleString('id-ID')} (Master)`;
                 }
