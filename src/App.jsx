@@ -9,7 +9,7 @@ import {
   PieChart, Key, Ban, Check, Edit, Calendar, BarChart2
 } from 'lucide-react';
 
- import { Analytics } from '@vercel/analytics/react';
+import { Analytics } from '@vercel/analytics/react';
 
 // Import the functions you need from the SDKs you need
 import { getAnalytics } from "firebase/analytics";
