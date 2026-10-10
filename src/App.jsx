@@ -784,13 +784,14 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   const handleAddTx = async (entity, qty = 1) => {
     if (isReadOnly || !entity) return;
     
-    let unitPrice = globalPrice > 0 ? globalPrice : (fallbackPrices[dbKeys.divType] === 0 ? 0 : 20000);
+    let unitPrice = globalPrice > 0 ? globalPrice : 20000;
     let activeGasProd = null;
     
     if (dbKeys.divType === 'GAS_INDUSTRI') {
       activeGasProd = customerGasSelections[entity.id] || Object.keys(gasMasterConfig)[0] || 'Oxygen, 6 m³';
       const customGas = entity.gasCustomPrices?.[activeGasProd];
-      if (customGas !== undefined && customGas !== null && customGas !== '' && !isNaN(Number(customGas))) {
+      const hasValidCustomGas = customGas !== undefined && customGas !== null && customGas !== '' && !isNaN(Number(customGas));
+      if (hasValidCustomGas) {
         unitPrice = Number(customGas);
       } else {
         unitPrice = gasMasterConfig[activeGasProd] || 150000;
@@ -801,7 +802,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
       if (hasValidCustomPrice) {
         unitPrice = Number(entPrice);
       } else {
-        unitPrice = globalPrice > 0 ? globalPrice : (globalPrice === 0 ? 0 : 20000);
+        unitPrice = globalPrice > 0 ? globalPrice : 20000;
       }
     }
 
@@ -920,7 +921,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   };
 
   const formLabel = dbKeys.divType === 'TANDON' ? 'Nama Supir' : dbKeys.divType === 'AIR_KAPAL' ? 'Nama Kapal' : 'Nama Pembeli';
-  const displayHeaderPrice = dbKeys.divType === 'GAS_INDUSTRI' ? 0 : (globalPrice > 0 ? globalPrice : (fallbackPrices[dbKeys.divType] || 20000));
+  const displayHeaderPrice = dbKeys.divType === 'GAS_INDUSTRI' ? 0 : (globalPrice > 0 ? globalPrice : 20000);
 
   return (
     <div className="max-w-md sm:max-w-xl mx-auto px-3 sm:px-4 py-4 pb-24 space-y-4 relative">
@@ -1003,7 +1004,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
 
                 const entPrice = ent.price;
                 const hasCustomPrice = entPrice !== undefined && entPrice !== null && entPrice !== '' && !isNaN(Number(entPrice));
-                const displayItemPrice = hasCustomPrice ? Number(entPrice) : (globalPrice > 0 ? globalPrice : (globalPrice === 0 ? 0 : 20000));
+                const displayItemPrice = hasCustomPrice ? Number(entPrice) : (globalPrice > 0 ? globalPrice : 20000);
                 const nonGasClasses = isActiveToday
                   ? "flex justify-between items-center p-3 rounded-xl border bg-white border-slate-300 shadow-md ring-1 ring-slate-100 gap-2 transition-all"
                   : "flex justify-between items-center p-2.5 rounded-xl border bg-slate-50/70 border-slate-200 gap-2 opacity-80 hover:opacity-100 transition-all hover:bg-slate-100";
