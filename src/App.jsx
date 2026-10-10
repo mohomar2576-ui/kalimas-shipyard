@@ -8,6 +8,7 @@ import {
   Share2, Anchor, Trash2, 
   PieChart, Key, Ban, Check, Edit, Calendar, BarChart2
 } from 'lucide-react';
+
  import { Analytics } from '@vercel/analytics/react';
 
 // Import the functions you need from the SDKs you need
@@ -90,7 +91,7 @@ const generateSecurePassword = (baseStr = 'user') => {
 const getEffectivePrice = (customPrice, globalPrice) => {
   const gp = Number(globalPrice) > 0 ? Number(globalPrice) : 20000;
   if (customPrice === 0 || customPrice === '0') return 0;
-  if (customPrice === undefined || customPrice === null || customPrice === '' || String(customPrice).trim() === '') {
+  if (customPrice === undefined || customPrice === null || customPrice === '' || String(customPrice).trim() === '' || isNaN(Number(customPrice))) {
     return gp;
   }
   const parsed = Number(customPrice);
@@ -131,10 +132,10 @@ const GalanganKalimasLogo = ({ size = 'md', variant = 'color', className = '' })
   return (
     <div className={`flex items-center gap-2.5 select-none ${className}`}>
       <img 
-        src="GK Logo Only.svg" 
+        src="public/GK Logo Only.png" 
         alt="Galangan Kalimas Logo" 
         className={`${s.h} w-auto object-contain shrink-0 drop-shadow-sm`} 
-        onError={(e) => { e.target.onerror = null; e.target.src = "GK Logo Only.png"; }}
+        onError={(e) => { e.target.onerror = null; e.target.src = "https://placehold.co/100x100/10b981/ffffff?text=GK"; }}
       />
       <div className="flex flex-col leading-none justify-center">
         <span className={`font-black tracking-wider uppercase font-sans ${s.t1} ${variant==='light'?'text-white':'text-slate-900'}`}>KALIMAS</span>
@@ -666,7 +667,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     const raw = getLocalData(dbKeys.entity, []);
     return (Array.isArray(raw) ? raw : []).map(ent => ({
       ...ent,
-      price: (ent.price === '' || ent.price === null || ent.price === undefined) ? undefined : ent.price
+      price: (ent.price === '' || ent.price === null || ent.price === undefined) ? null : ent.price
     }));
   });
   const [allTx, setAllTx] = useState(() => getLocalData('transactions', []));
@@ -713,7 +714,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
       unsubs.push(onSnapshot(getPublicPath(dbKeys.entity), snap => { 
         const l = snap.docs.map(d=>({id:d.id,...d.data()})); 
         if(Array.isArray(l) && l.length > 0) { 
-          const normalized = l.map(ent => ({ ...ent, price: (ent.price === '' || ent.price === null || ent.price === undefined) ? undefined : ent.price }));
+          const normalized = l.map(ent => ({ ...ent, price: (ent.price === '' || ent.price === null || ent.price === undefined) ? null : ent.price }));
           setEntities(normalized); 
           setLocalData(dbKeys.entity, normalized); 
         } 
@@ -832,7 +833,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
       address: newAddr.trim(), 
       whatsapp: newWa.trim(),
       portalAccessEnabled: false, 
-      price: undefined,
+      price: null, // explicitly null so Firestore saves properly
       gasCustomPrices: {}, 
       createdAt: Date.now()
     };
@@ -980,7 +981,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                 }
 
                 const displayItemPrice = getEffectivePrice(ent.price, globalPrice);
-                const hasCustomPrice = ent.price !== undefined && ent.price !== null && ent.price !== '' && String(ent.price).trim() !== '';
+                const hasCustomPrice = ent.price !== undefined && ent.price !== null && ent.price !== '' && String(ent.price).trim() !== '' && !isNaN(Number(ent.price));
                 const nonGasClasses = isActiveToday
                   ? "flex justify-between items-center p-3 rounded-xl border bg-white border-slate-300 shadow-md ring-1 ring-slate-100 gap-2 transition-all"
                   : "flex justify-between items-center p-2.5 rounded-xl border bg-slate-50/70 border-slate-200 gap-2 opacity-80 hover:opacity-100 transition-all hover:bg-slate-100";
@@ -1421,12 +1422,12 @@ const AdminPanel = ({ onNavigateHome }) => {
     if (activeCategory !== 'CUSTOMER') return;
     const conf = custConfigs[activeCustTab];
     const initialLocal = getLocalData(conf.key, []);
-    setCustData(Array.isArray(initialLocal) ? initialLocal.map(c => ({...c, price: (c.price === '' || c.price === null || c.price === undefined) ? undefined : c.price})) : []);
+    setCustData(Array.isArray(initialLocal) ? initialLocal.map(c => ({...c, price: (c.price === '' || c.price === null || c.price === undefined) ? null : c.price})) : []);
 
     const unsub = onSnapshot(getPublicPath(conf.key), snap => {
       const l = snap.docs.map(d=>({id:d.id,...d.data()}));
       if (Array.isArray(l)) { 
-        const normalized = l.map(c => ({...c, price: (c.price === '' || c.price === null || c.price === undefined) ? undefined : c.price}));
+        const normalized = l.map(c => ({...c, price: (c.price === '' || c.price === null || c.price === undefined) ? null : c.price}));
         setCustData(normalized); 
         setLocalData(conf.key, normalized); 
       }
@@ -1506,10 +1507,10 @@ const AdminPanel = ({ onNavigateHome }) => {
         }
       });
       payload.gasCustomPrices = cleanGasPrices;
-      payload.price = undefined; 
+      payload.price = null; // Explicitly null so Firestore saves properly
     } else {
       const hasInputPrice = custForm.customPrice !== undefined && custForm.customPrice !== null && custForm.customPrice !== '' && !isNaN(Number(custForm.customPrice));
-      payload.price = hasInputPrice ? Number(custForm.customPrice) : undefined;
+      payload.price = hasInputPrice ? Number(custForm.customPrice) : null; // Explicitly null so Firestore saves properly
     }
 
     if (activeCustTab === 'TANGKI' || activeCustTab === 'GAS') payload.companyName = custForm.companyName.trim();
@@ -1855,6 +1856,7 @@ const AdminPanel = ({ onNavigateHome }) => {
       <Modal isOpen={isCustModalOpen} onClose={()=>setIsCustModalOpen(false)} title={editingCust ? `Edit ${currConf.label}` : `Tambah ${currConf.label}`}>
         <form onSubmit={handleSaveCustomer} className="space-y-3">
           {custError && <div className="p-2 bg-red-50 text-red-700 text-xs font-bold rounded-lg">{custError}</div>}
+          <div className="p-2.5 bg-emerald-50 text-emerald-700 rounded-xl text-[10px] font-bold text-center mb-3">Kosongkan Harga Khusus agar sistem menggunakan <span className="font-black">Master Harga</span>. (0 hanya untuk FOC).</div>
           <div>
             <label className="text-[10px] font-bold uppercase text-slate-500">{activeFormLabel} (Wajib Unik)</label>
             <input type="text" value={custForm.name} onChange={e=>{
