@@ -2079,7 +2079,7 @@ export default function App() {
     <ErrorBoundary>
       <AuthProvider>
         <MainApp />
-        {/* <Analytics /> */}
+        <Analytics />
       </AuthProvider>
     </ErrorBoundary>
   );
