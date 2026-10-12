@@ -649,7 +649,7 @@ const DivisionSplitStatsCards = ({ todayVol, myTodayVol, todayRev, myTodayRev, t
   </div>
 );
 
-const PurchasePerformanceGraph = ({ txList = [] }) => {
+const PurchasePerformanceGraph = ({ txList = [], metric = 'VOLUME' }) => {
   const [viewMode, setViewMode] = useState('CUSTOMER');
   const [isViewAllOpen, setIsViewAllOpen] = useState(false);
 
@@ -665,11 +665,18 @@ const PurchasePerformanceGraph = ({ txList = [] }) => {
     
     return Object.entries(dataMap)
       .map(([name, data]) => ({ name, count: data.count, omset: data.omset }))
-      .sort((a, b) => b.count - a.count);
-  }, [txList, viewMode]);
+      .sort((a, b) => metric === 'OMSET' ? (b.omset - a.omset) : (b.count - a.count));
+  }, [txList, viewMode, metric]);
 
   const chartData = allSortedData.slice(0, 5);
-  const maxVal = chartData.length > 0 ? Math.max(...chartData.map(d => d.count), 5) : 5;
+  const maxVal = chartData.length > 0 ? Math.max(...chartData.map(d => metric === 'OMSET' ? d.omset : d.count), 5) : 5;
+
+  const formatDisplayValue = (val) => {
+    if (metric === 'VOLUME') return val;
+    if (val >= 1000000) return (val / 1000000).toFixed(1).replace('.0', '') + 'Jt';
+    if (val >= 1000) return (val / 1000).toFixed(0) + 'k';
+    return val;
+  };
 
   return (
     <Card className="p-4 space-y-3 bg-white border-slate-200 shadow-sm relative">
@@ -690,12 +697,13 @@ const PurchasePerformanceGraph = ({ txList = [] }) => {
         {chartData.length === 0 ? (
           <div className="text-xs text-slate-400 m-auto italic">Belum ada data transaksi.</div>
         ) : chartData.map((d, idx) => {
-          const heightPercent = maxVal > 0 ? Math.max(Math.round((d.count / maxVal) * 100), 6) : 6;
+          const dataValue = metric === 'OMSET' ? d.omset : d.count;
+          const heightPercent = maxVal > 0 ? Math.max(Math.round((dataValue / maxVal) * 100), 6) : 6;
           return (
             <div key={idx} className="flex flex-col items-center gap-1 h-full justify-end flex-1 min-w-[30px] group cursor-default">
-              <span className="text-[9px] font-bold text-slate-500 opacity-0 group-hover:opacity-100 transition-all">{d.count}</span>
+              <span className="text-[9px] font-bold text-slate-500 opacity-0 group-hover:opacity-100 transition-all">{formatDisplayValue(dataValue)}</span>
               <div 
-                className={`w-full max-w-[36px] rounded-t transition-all ${d.count > 0 ? 'bg-emerald-500 group-hover:bg-emerald-600 shadow-xs' : 'bg-slate-200'}`} 
+                className={`w-full max-w-[36px] rounded-t transition-all ${dataValue > 0 ? 'bg-emerald-500 group-hover:bg-emerald-600 shadow-xs' : 'bg-slate-200'}`} 
                 style={{ height: `${heightPercent}%` }}
               ></div>
               <span className="text-[9px] font-bold text-slate-600 text-center leading-tight truncate w-full px-1" title={d.name}>
@@ -1519,7 +1527,10 @@ const ReportsModule = ({ user, onNavigateHome }) => {
         )}
       </Card>
       
-      <PurchasePerformanceGraph txList={activeTx} />
+      <PurchasePerformanceGraph 
+        txList={selectedDiv ? activeTx.filter(t => t.divisionType === selectedDiv) : activeTx} 
+        metric={selectedDiv ? 'VOLUME' : 'OMSET'} 
+      />
     </div>
   );
 };
@@ -2224,7 +2235,7 @@ export default function App() {
     <ErrorBoundary>
       <AuthProvider>
         <MainApp />
-         <Analytics /> 
+        <Analytics /> 
       </AuthProvider>
     </ErrorBoundary>
   );
