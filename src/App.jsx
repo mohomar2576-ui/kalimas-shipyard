@@ -668,7 +668,7 @@ const PurchasePerformanceGraph = ({ txList = [], metric = 'VOLUME' }) => {
       .sort((a, b) => metric === 'OMSET' ? (b.omset - a.omset) : (b.count - a.count));
   }, [txList, viewMode, metric]);
 
-  const chartData = allSortedData.slice(0, 5);
+  const chartData = allSortedData.slice(0, 10);
   const maxVal = chartData.length > 0 ? Math.max(...chartData.map(d => metric === 'OMSET' ? d.omset : d.count), 5) : 5;
 
   const formatDisplayValue = (val) => {
@@ -701,7 +701,7 @@ const PurchasePerformanceGraph = ({ txList = [], metric = 'VOLUME' }) => {
           const heightPercent = maxVal > 0 ? Math.max(Math.round((dataValue / maxVal) * 100), 6) : 6;
           return (
             <div key={idx} className="flex flex-col items-center gap-1 h-full justify-end flex-1 min-w-[30px] group cursor-default">
-              <span className="text-[9px] font-bold text-slate-500 opacity-0 group-hover:opacity-100 transition-all">{formatDisplayValue(dataValue)}</span>
+              <span className="text-[9px] font-bold text-slate-500 opacity-0 group-hover:opacity-100 transition-all whitespace-nowrap">{formatDisplayValue(dataValue)}</span>
               <div 
                 className={`w-full max-w-[36px] rounded-t transition-all ${dataValue > 0 ? 'bg-emerald-500 group-hover:bg-emerald-600 shadow-xs' : 'bg-slate-200'}`} 
                 style={{ height: `${heightPercent}%` }}
@@ -1199,9 +1199,6 @@ const ReportsModule = ({ user, onNavigateHome }) => {
   const [rangeStart, setRangeStart] = useState(() => getMakassarDateString());
   const [rangeEnd, setRangeEnd] = useState(() => getMakassarDateString());
   
-  // Trend Filtering
-  const [selectedTrendDiv, setSelectedTrendDiv] = useState('ALL');
-  
   const [selectedDiv, setSelectedDiv] = useState(null);
   const [allTx, setAllTx] = useState(() => getLocalData('transactions', []));
   
@@ -1284,8 +1281,7 @@ const ReportsModule = ({ user, onNavigateHome }) => {
   });
   const maxDivRev = Math.max(...divRevenues.map(d => d.rev), 1000);
 
-  // Apply Trend Filter
-  const filteredAllTx = selectedTrendDiv === 'ALL' ? safeAllTx : safeAllTx.filter(t => t.divisionType === selectedTrendDiv);
+  const filteredAllTx = selectedDiv ? safeAllTx.filter(t => t.divisionType === selectedDiv) : safeAllTx;
 
   const weeklyData = useMemo(() => {
     if (reportTab !== 'WEEK') return [];
@@ -1486,12 +1482,10 @@ const ReportsModule = ({ user, onNavigateHome }) => {
 
         {(reportTab === 'WEEK' || reportTab === 'MONTH') && (
           <div className="pt-4 border-t border-slate-100 animate-in fade-in space-y-2">
-            <div className="flex justify-between items-center">
-               <h3 className="font-extrabold text-xs uppercase">Tren Harian</h3>
-               <select value={selectedTrendDiv} onChange={e=>setSelectedTrendDiv(e.target.value)} className="p-1.5 bg-slate-100 border border-slate-200 rounded-lg text-[10px] font-bold outline-none cursor-pointer text-slate-700">
-                  <option value="ALL">Semua Divisi (Gabungan)</option>
-                  {divs.map(d => <option key={d.key} value={d.key}>{d.name}</option>)}
-               </select>
+            <div className="flex justify-between items-center pb-2">
+               <h3 className="font-extrabold text-xs uppercase text-slate-800">
+                   Tren Pendapatan Harian {selectedDiv && <span className="text-emerald-600">- {divs.find(d=>d.key===selectedDiv)?.name}</span>}
+               </h3>
             </div>
             
             {reportTab === 'WEEK' ? (
@@ -1825,7 +1819,7 @@ const AdminPanel = ({ onNavigateHome }) => {
     <div className="max-w-md sm:max-w-3xl mx-auto px-3 sm:px-4 py-4 pb-24 space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <Button variant="outline" onClick={onNavigateHome} className="p-2.5 rounded-xl border-emerald-200"><ArrowLeft size={18} className="text-emerald-700"/></Button>
+          <Button variant="outline" onClick={onNavigateHome} className="p-2.5 rounded-xl border-emerald-200"><ArrowLeft size={18} className="textemerald-700"/></Button>
           <div>
             <span className="text-[10px] font-black tracking-widest text-emerald-700 uppercase">ADMINISTRASI POS</span>
             <h1 className="text-xl font-black text-emerald-900"><Settings size={20} className="inline-block text-emerald-700" /> Panel Admin</h1>
@@ -2235,7 +2229,7 @@ export default function App() {
     <ErrorBoundary>
       <AuthProvider>
         <MainApp />
-        <Analytics /> 
+         <Analytics /> 
       </AuthProvider>
     </ErrorBoundary>
   );
