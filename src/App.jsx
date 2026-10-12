@@ -5,7 +5,7 @@ import { getFirestore, doc, setDoc, onSnapshot, collection, updateDoc } from 'fi
 import { 
   Users, Settings, Plus, X, LogOut, Droplet, Package, 
   Flame, ChevronRight, ArrowLeft, Truck,
-  Share2, Anchor, Trash2, 
+  Share2, Anchor, Trash2, Download, List,
   PieChart, Key, Ban, Check, Edit, Calendar, BarChart2
 } from 'lucide-react';
 
@@ -31,10 +31,21 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-kalimas-app';
+const appId = typeof window !== 'undefined' && window.__app_id ? window.__app_id : 'default-kalimas-app';
 
 const getPublicPath = (collectionName) => collection(db, 'artifacts', appId, 'public', 'data', collectionName);
 const getDocPath = (collectionName, docId) => doc(db, 'artifacts', appId, 'public', 'data', collectionName, docId);
+
+// ==========================================
+// 3. UTILITY FUNCTIONS & CONSTANTS
+// ==========================================
+const CUST_CONFIGS = {
+  TANDON: { key: 'tandon_drivers', nameField: 'name', prefix: 'td', label: 'Sopir Tandon', priceKey: 'TANDON' },
+  TANGKI: { key: 'tangki_customers', nameField: 'name', prefix: 'mt', label: 'Pembeli Mobil Tangki', priceKey: 'TANGKI' },
+  GALLON: { key: 'gallon_customers', nameField: 'name', prefix: 'gl', label: 'Pembeli Air Gallon', priceKey: 'GALLON' },
+  KAPAL: { key: 'kapal_ships', nameField: 'shipName', prefix: 'ak', label: 'Kapal', priceKey: 'KAPAL' },
+  GAS: { key: 'gas_customers', nameField: 'name', prefix: 'gs', label: 'Gas Industri', priceKey: 'GAS' }
+};
 
 const getMakassarDateString = (date = new Date()) => {
   try {
@@ -44,6 +55,7 @@ const getMakassarDateString = (date = new Date()) => {
     const parts = formatter.formatToParts(d);
     return `${parts.find(p=>p.type==='year').value}-${parts.find(p=>p.type==='month').value}-${parts.find(p=>p.type==='day').value}`;
   } catch (err) {
+    console.warn("Date error:", err);
     return new Date(Date.now() + (8 * 3600 * 1000)).toISOString().split('T')[0];
   }
 };
@@ -54,7 +66,10 @@ const getAdjacentDateString = (dateStr = getMakassarDateString(), offset = 0) =>
     const parts = dateStr.split('-').map(Number);
     const d = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2] + offset));
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
-  } catch (err) { return getMakassarDateString(); }
+  } catch (err) { 
+    console.warn("Adjacent date error:", err); 
+    return getMakassarDateString(); 
+  }
 };
 
 const getMakassarTimeString = (timestamp = Date.now()) => {
@@ -62,7 +77,10 @@ const getMakassarTimeString = (timestamp = Date.now()) => {
     let d = (typeof timestamp.toDate === 'function') ? timestamp.toDate() : new Date(timestamp);
     if (isNaN(d.getTime())) return '--:--';
     return new Intl.DateTimeFormat('id-ID', { timeZone: 'Asia/Makassar', hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
-  } catch (err) { return '--:--'; }
+  } catch (err) { 
+    console.warn("Time error:", err);
+    return '--:--'; 
+  }
 };
 
 const getLocalData = (key, fallback) => {
@@ -74,11 +92,15 @@ const getLocalData = (key, fallback) => {
       return parsed;
     }
     return fallback;
-  } catch (e) { return fallback; }
+  } catch (e) { 
+    console.warn("Local storage get error:", e);
+    return fallback; 
+  }
 };
 
 const setLocalData = (key, value) => {
-  try { localStorage.setItem(`kalimas_${key}`, JSON.stringify(value)); } catch (e) {}
+  try { localStorage.setItem(`kalimas_${key}`, JSON.stringify(value)); } 
+  catch (e) { console.warn("Local storage set error:", e); }
 };
 
 const generateSecurePassword = (baseStr = 'user') => {
@@ -99,6 +121,9 @@ const getEffectivePrice = (customPrice, globalPrice) => {
   return isNaN(parsed) ? gp : parsed;
 };
 
+// ==========================================
+// 4. SHARED COMPONENTS
+// ==========================================
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -108,7 +133,7 @@ class ErrorBoundary extends React.Component {
     return { hasError: true, error };
   }
   componentDidCatch(error, errorInfo) {
-    console.error("ErrorBoundary caught an error:", error, errorInfo);
+    console.warn("ErrorBoundary caught an error:", error, errorInfo);
   }
   render() {
     if (this.state.hasError) {
@@ -131,20 +156,28 @@ const GalanganKalimasLogo = ({ size = 'md', variant = 'color', className = '' })
   const sizes = { sm: { h: 'h-8', t1: 'text-sm', t2: 'text-[8px]' }, md: { h: 'h-12', t1: 'text-lg', t2: 'text-[10px]' }, lg: { h: 'h-16', t1: 'text-2xl', t2: 'text-xs' } };
   const s = sizes[size] || sizes.md;
   
-  const [imgSrc, setImgSrc] = useState('/GK Logo Only.png');
+  const [fallbackLevel, setFallbackLevel] = useState(0);
+
+  const getImgSrc = () => {
+    switch(fallbackLevel) {
+      case 0: return '/GK Logo Only.png';
+      case 1: return '/GK Logo Only.svg';
+      case 2: return 'public/GK Logo Only.png';
+      case 3: return 'public/GK Logo Only.svg';
+      default: return 'https://placehold.co/100x100/10b981/ffffff?text=GK';
+    }
+  };
 
   const handleError = () => {
-    // Smart cascading fallback to find the logo whether it's PNG, SVG, or in a subfolder
-    if (imgSrc === '/GK Logo Only.png') setImgSrc('/GK Logo Only.svg');
-    else if (imgSrc === '/GK Logo Only.svg') setImgSrc('public/GK Logo Only.png');
-    else if (imgSrc === 'public/GK Logo Only.png') setImgSrc('public/GK Logo Only.svg');
-    else setImgSrc('https://placehold.co/100x100/10b981/ffffff?text=GK');
+    if (fallbackLevel < 4) {
+      setFallbackLevel(prev => prev + 1);
+    }
   };
 
   return (
     <div className={`flex items-center gap-2.5 select-none ${className}`}>
       <img 
-        src={imgSrc} 
+        src={getImgSrc()} 
         alt="Galangan Kalimas Logo" 
         className={`${s.h} w-auto object-contain shrink-0 drop-shadow-sm`} 
         onError={handleError}
@@ -191,6 +224,9 @@ const Modal = ({ isOpen, onClose, title, children }) => {
   );
 };
 
+// ==========================================
+// 5. CONTEXT & AUTH
+// ==========================================
 const AuthContext = createContext();
 
 const AuthProvider = ({ children }) => {
@@ -201,12 +237,11 @@ const AuthProvider = ({ children }) => {
     const users = getLocalData('all_users', []);
     return localInit || users.length > 0;
   });
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let unsub = null;
     const initAuth = async () => {
-      try { await signInAnonymously(auth); } catch (err) {}
+      try { await signInAnonymously(auth); } catch (err) { console.warn(err); }
     };
     initAuth();
 
@@ -243,15 +278,14 @@ const AuthProvider = ({ children }) => {
                 }
               }
             }
-            setLoading(false);
-          }, () => { setLoading(false); });
-        } catch (e) { setLoading(false); }
+          }, (err) => { console.warn(err); });
+        } catch (e) { console.warn(e); }
       } else {
-        try { await signInAnonymously(auth); } catch (err) { setLoading(false); }
+        try { await signInAnonymously(auth); } catch (err) { console.warn(err); }
       }
     });
 
-    const handleFocus = () => { try { auth.currentUser || signInAnonymously(auth); } catch (e) {} };
+    const handleFocus = () => { try { auth.currentUser || signInAnonymously(auth); } catch (e) { console.warn(e); } };
     window.addEventListener('focus', handleFocus);
 
     return () => { 
@@ -321,6 +355,10 @@ const AuthProvider = ({ children }) => {
   return <AuthContext.Provider value={{ sessionUser, allUsers, setAllUsers, systemInitialized, setSystemInitialized, login, logout }}>{children}</AuthContext.Provider>;
 };
 
+// ==========================================
+// 6. MODULES & VIEWS
+// ==========================================
+
 const SystemInitScreen = () => {
   const { setAllUsers, setSystemInitialized } = useContext(AuthContext);
   const [name, setName] = useState(''); const [user, setUser] = useState(''); const [pwd, setPwd] = useState('');
@@ -345,8 +383,8 @@ const SystemInitScreen = () => {
           'CO₂, 25 kg': 550000, 'LPG, 50 kg': 1500000, 'LPG, 12 kg': 275000, 'Oxygen Medis, 2 m³': 100000, 'Oxygen Medis, 6 m³': 150000
         }}
       ];
-      await Promise.all(defaultConfigs.map(conf => setDoc(getDocPath('settings', conf.key), { ...conf, updatedBy: 'SYSTEM_INIT', updatedAt: Date.now() }).catch(()=>{})));
-    } catch(err){}
+      await Promise.all(defaultConfigs.map(conf => setDoc(getDocPath('settings', conf.key), { ...conf, updatedBy: 'SYSTEM_INIT', updatedAt: Date.now() }).catch((err)=>{ console.warn(err); })));
+    } catch(err){ console.warn(err); }
   };
 
   return (
@@ -419,8 +457,8 @@ const CustomerPortal = ({ user, logout }) => {
       unsub = onSnapshot(getPublicPath('transactions'), snap => { 
         const l = snap.docs.map(d=>({id:d.id,...d.data()})); 
         if(Array.isArray(l)) { setAllTx(l); setLocalData('transactions', l); } 
-      }, ()=>{});
-    } catch(e){}
+      }, (err)=>{ console.warn(err); });
+    } catch(e){ console.warn(e); }
     return () => { if(unsub) unsub(); };
   }, []);
 
@@ -433,7 +471,7 @@ const CustomerPortal = ({ user, logout }) => {
       if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
         return parts;
       }
-    } catch(e){}
+    } catch(e){ console.warn(e); }
     return getMakassarDateString().split('-').map(Number);
   }, [safeDateStr]);
 
@@ -478,7 +516,7 @@ const CustomerPortal = ({ user, logout }) => {
         res.push({ day: i, ds, vol: dayTx.reduce((s, t) => s + (t.quantity || 1), 0) });
       }
       return res;
-    } catch(e) { return []; }
+    } catch(e) { console.warn(e); return []; }
   }, [dateParts, myTx]);
 
   const maxGraphVol = useMemo(() => {
@@ -613,35 +651,41 @@ const DivisionSplitStatsCards = ({ todayVol, myTodayVol, todayRev, myTodayRev, t
 
 const PurchasePerformanceGraph = ({ txList = [] }) => {
   const [viewMode, setViewMode] = useState('CUSTOMER');
+  const [isViewAllOpen, setIsViewAllOpen] = useState(false);
 
-  const chartData = useMemo(() => {
+  const allSortedData = useMemo(() => {
     const dataMap = {};
     const safeTxList = Array.isArray(txList) ? txList : [];
     safeTxList.forEach(t => {
       const key = viewMode === 'CUSTOMER' ? (t.entityName || 'UMUM') : (t.operatorName || 'SISTEM');
-      if (!dataMap[key]) dataMap[key] = 0;
-      dataMap[key] += (t.quantity || 1);
+      if (!dataMap[key]) dataMap[key] = { count: 0, omset: 0 };
+      dataMap[key].count += (t.quantity || 1);
+      if (t.unitPrice !== 0) dataMap[key].omset += (t.totalAmount || 0);
     });
     
     return Object.entries(dataMap)
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 6);
+      .map(([name, data]) => ({ name, count: data.count, omset: data.omset }))
+      .sort((a, b) => b.count - a.count);
   }, [txList, viewMode]);
 
+  const chartData = allSortedData.slice(0, 5);
   const maxVal = chartData.length > 0 ? Math.max(...chartData.map(d => d.count), 5) : 5;
 
   return (
-    <Card className="p-4 space-y-3 bg-white border-slate-200 shadow-sm">
+    <Card className="p-4 space-y-3 bg-white border-slate-200 shadow-sm relative">
       <div className="flex justify-between items-center pb-2 border-b border-slate-100">
         <h3 className="font-extrabold text-xs uppercase text-slate-800 flex items-center gap-1.5">
           <PieChart size={15} className="text-emerald-600" /> Performa ({viewMode === 'CUSTOMER' ? 'Top Pelanggan' : 'Top Operator'})
         </h3>
-        <div className="flex bg-slate-100 p-0.5 rounded-lg text-[9px] font-bold">
-          <button onClick={() => setViewMode('CUSTOMER')} className={`px-2 py-1 rounded transition-colors cursor-pointer ${viewMode === 'CUSTOMER' ? 'bg-white shadow-xs text-emerald-700' : 'text-slate-500'}`}>Pelanggan</button>
-          <button onClick={() => setViewMode('OPERATOR')} className={`px-2 py-1 rounded transition-colors cursor-pointer ${viewMode === 'OPERATOR' ? 'bg-white shadow-xs text-emerald-700' : 'text-slate-500'}`}>Operator</button>
+        <div className="flex items-center gap-2">
+          <div className="flex bg-slate-100 p-0.5 rounded-lg text-[9px] font-bold">
+            <button onClick={() => setViewMode('CUSTOMER')} className={`px-2 py-1 rounded transition-colors cursor-pointer ${viewMode === 'CUSTOMER' ? 'bg-white shadow-xs text-emerald-700' : 'text-slate-500'}`}>Pelanggan</button>
+            <button onClick={() => setViewMode('OPERATOR')} className={`px-2 py-1 rounded transition-colors cursor-pointer ${viewMode === 'OPERATOR' ? 'bg-white shadow-xs text-emerald-700' : 'text-slate-500'}`}>Operator</button>
+          </div>
+          <button onClick={() => setIsViewAllOpen(true)} className="p-1.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-lg cursor-pointer transition-colors shadow-sm" title="Lihat Semua"><List size={14}/></button>
         </div>
       </div>
+      
       <div className="flex items-end justify-around gap-2 h-28 pt-4 pb-1 px-1 bg-slate-50 rounded-xl border border-slate-200 overflow-x-auto">
         {chartData.length === 0 ? (
           <div className="text-xs text-slate-400 m-auto italic">Belum ada data transaksi.</div>
@@ -651,16 +695,40 @@ const PurchasePerformanceGraph = ({ txList = [] }) => {
             <div key={idx} className="flex flex-col items-center gap-1 h-full justify-end flex-1 min-w-[30px] group cursor-default">
               <span className="text-[9px] font-bold text-slate-500 opacity-0 group-hover:opacity-100 transition-all">{d.count}</span>
               <div 
-                className={`w-full max-w-[28px] rounded-t transition-all ${d.count > 0 ? 'bg-emerald-500 group-hover:bg-emerald-600 shadow-xs' : 'bg-slate-200'}`} 
+                className={`w-full max-w-[36px] rounded-t transition-all ${d.count > 0 ? 'bg-emerald-500 group-hover:bg-emerald-600 shadow-xs' : 'bg-slate-200'}`} 
                 style={{ height: `${heightPercent}%` }}
               ></div>
-              <span className="text-[8px] font-bold text-slate-600 text-center leading-tight truncate w-full px-1" title={d.name}>
+              <span className="text-[9px] font-bold text-slate-600 text-center leading-tight truncate w-full px-1" title={d.name}>
                 {d.name.length > 8 ? d.name.slice(0,8) + '..' : d.name}
               </span>
             </div>
           );
         })}
       </div>
+
+      <Modal isOpen={isViewAllOpen} onClose={() => setIsViewAllOpen(false)} title={`Daftar Lengkap ${viewMode === 'CUSTOMER' ? 'Pelanggan' : 'Operator'}`}>
+        <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+          {allSortedData.length === 0 ? (
+             <p className="text-xs text-slate-400 text-center py-6 italic">Belum ada data.</p>
+          ) : (
+            allSortedData.map((d, idx) => (
+              <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 border border-slate-100 rounded-xl hover:bg-slate-100 transition-colors">
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] font-black text-slate-400 w-4 text-right">#{idx + 1}</span>
+                  <div>
+                    <p className="text-xs font-black uppercase text-slate-800">{d.name}</p>
+                    <p className="text-[10px] font-bold text-emerald-600">Total Volume: {d.count}</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] text-slate-500 uppercase font-bold">Total Omset</p>
+                  <p className="text-xs font-black text-slate-900">Rp {d.omset.toLocaleString('id-ID')}</p>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </Modal>
     </Card>
   );
 };
@@ -677,10 +745,11 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   const [activeTab, setActiveTab] = useState('INPUT'); 
   const [entities, setEntities] = useState(() => {
     const raw = getLocalData(dbKeys.entity, []);
-    return (Array.isArray(raw) ? raw : []).map(ent => ({
-      ...ent,
-      price: (ent.price === '' || ent.price === null || ent.price === undefined) ? null : ent.price
-    }));
+    return (Array.isArray(raw) ? raw : []).map(ent => {
+      const p = ent.price;
+      const isBlank = p === undefined || p === null || p === '' || String(p).trim() === '' || isNaN(Number(p));
+      return { ...ent, price: isBlank ? undefined : p };
+    });
   });
   const [allTx, setAllTx] = useState(() => getLocalData('transactions', []));
   const [search, setSearch] = useState('');
@@ -721,22 +790,26 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
             setGlobalPrice(Number(dat.price));
           } else { setGlobalPrice(defaultFp); }
         } else { setGlobalPrice(defaultFp); }
-      }, ()=>{ setGlobalPrice(defaultFp); }));
+      }, (err)=>{ console.warn(err); setGlobalPrice(defaultFp); }));
       
       unsubs.push(onSnapshot(getPublicPath(dbKeys.entity), snap => { 
         const l = snap.docs.map(d=>({id:d.id,...d.data()})); 
         if(Array.isArray(l) && l.length > 0) { 
-          const normalized = l.map(ent => ({ ...ent, price: (ent.price === '' || ent.price === null || ent.price === undefined) ? null : ent.price }));
+          const normalized = l.map(ent => {
+            const p = ent.price;
+            const isBlank = p === undefined || p === null || p === '' || String(p).trim() === '' || isNaN(Number(p));
+            return { ...ent, price: isBlank ? undefined : p };
+          });
           setEntities(normalized); 
           setLocalData(dbKeys.entity, normalized); 
         } 
-      }, ()=>{}));
+      }, (err)=>{ console.warn(err); }));
       
       unsubs.push(onSnapshot(getPublicPath('transactions'), snap => { 
         const l = snap.docs.map(d=>({id:d.id,...d.data()})); 
         if(Array.isArray(l)) { setAllTx(l); setLocalData('transactions', l); } 
-      }, ()=>{}));
-    } catch(e){ setGlobalPrice(defaultFp); }
+      }, (err)=>{ console.warn(err); }));
+    } catch(e){ console.warn(e); setGlobalPrice(defaultFp); }
     return () => unsubs.forEach(u => u && u());
   }, [dbKeys.entity, dbKeys.config, dbKeys.divType, fallbackPrices]);
 
@@ -819,7 +892,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     setTimeout(() => { setLastTxToast(prev => prev?.id === txId ? null : prev); }, 6000);
 
     try { await setDoc(getDocPath('transactions', txId), txPayload); } 
-    catch (err) { console.warn("Firebase write warning (Offline), operating via local storage fallback."); }
+    catch (err) { console.warn("Firebase write warning (Offline), operating via local storage fallback.", err); }
   };
 
   const handleUndo = async (txId) => {
@@ -827,7 +900,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     const updatedTxList = allTx.map(t => t.id === txId ? { ...t, status: 'VOIDED', voidedAt: Date.now(), voidedBy: user.name } : t);
     setAllTx(updatedTxList); setLocalData('transactions', updatedTxList);
     setLastTxToast(null);
-    try { await updateDoc(getDocPath('transactions', txId), { status: 'VOIDED', voidedAt: Date.now(), voidedBy: user.name }); } catch(err){}
+    try { await updateDoc(getDocPath('transactions', txId), { status: 'VOIDED', voidedAt: Date.now(), voidedBy: user.name }); } catch(err){ console.warn(err); }
   };
 
   const handleAddNewEntity = async (e) => {
@@ -845,7 +918,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
       address: newAddr.trim(), 
       whatsapp: newWa.trim(),
       portalAccessEnabled: false, 
-      price: null, // explicitly null so Firestore saves properly
+      price: null, 
       gasCustomPrices: {}, 
       createdAt: Date.now()
     };
@@ -862,7 +935,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     setEntities(updatedEntities); setLocalData(dbKeys.entity, updatedEntities);
     setIsAddOpen(false);
     
-    try { await setDoc(getDocPath(dbKeys.entity, newEntity.id), newEntity); } catch (err) {}
+    try { await setDoc(getDocPath(dbKeys.entity, newEntity.id), newEntity); } catch (err) { console.warn(err); }
   };
 
   const getAddButtons = (entity) => {
@@ -1113,17 +1186,36 @@ const ReportsModule = ({ user, onNavigateHome }) => {
   const [selectedMonthStr, setSelectedMonthStr] = useState(() => {
     const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
+  
+  // Custom Range States
+  const [rangeStart, setRangeStart] = useState(() => getMakassarDateString());
+  const [rangeEnd, setRangeEnd] = useState(() => getMakassarDateString());
+  
+  // Trend Filtering
+  const [selectedTrendDiv, setSelectedTrendDiv] = useState('ALL');
+  
   const [selectedDiv, setSelectedDiv] = useState(null);
   const [allTx, setAllTx] = useState(() => getLocalData('transactions', []));
   
+  // Master Prices for FOC Valuation
+  const [masterPrices, setMasterPrices] = useState({ TANDON: 20000, GALLON: 6000, MOBIL_TANGKI: 350000, AIR_KAPAL: 50000 });
+  const [gasMasterConfig, setGasMasterConfig] = useState({});
+
   useEffect(() => {
     let unsubs = [];
     try {
       unsubs.push(onSnapshot(getPublicPath('transactions'), snap => { 
         const l = snap.docs.map(d=>({id:d.id,...d.data()})); 
         if(Array.isArray(l)) { setAllTx(l); setLocalData('transactions', l); } 
-      }, ()=>{}));
-    } catch(e){}
+      }, (err)=>{ console.warn(err); }));
+
+      unsubs.push(onSnapshot(getDocPath('settings', 'tandon_config'), snap => { if(snap.exists()) setMasterPrices(p=>({...p, TANDON: snap.data().price??20000})); }, e=>console.warn(e)));
+      unsubs.push(onSnapshot(getDocPath('settings', 'gallon_config'), snap => { if(snap.exists()) setMasterPrices(p=>({...p, GALLON: snap.data().price??6000})); }, e=>console.warn(e)));
+      unsubs.push(onSnapshot(getDocPath('settings', 'tangki_config'), snap => { if(snap.exists()) setMasterPrices(p=>({...p, MOBIL_TANGKI: snap.data().price??350000})); }, e=>console.warn(e)));
+      unsubs.push(onSnapshot(getDocPath('settings', 'kapal_config'), snap => { if(snap.exists()) setMasterPrices(p=>({...p, AIR_KAPAL: snap.data().price??50000})); }, e=>console.warn(e)));
+      unsubs.push(onSnapshot(getDocPath('settings', 'gas_config'), snap => { if(snap.exists() && snap.data().products) { setGasMasterConfig(snap.data().products); } }, e=>console.warn(e)));
+
+    } catch(e){ console.warn(e); }
     return () => unsubs.forEach(u => u && u());
   }, []);
 
@@ -1134,6 +1226,7 @@ const ReportsModule = ({ user, onNavigateHome }) => {
   const safeAllTx = Array.isArray(allTx) ? allTx : [];
   const activeTx = useMemo(() => {
     if (reportTab === 'TODAY') return safeAllTx.filter(t => t.dateStr === activeDateStr && t.status !== 'VOIDED');
+    if (reportTab === 'RANGE') return safeAllTx.filter(t => t.dateStr >= rangeStart && t.dateStr <= rangeEnd && t.status !== 'VOIDED');
     if (reportTab === 'WEEK') {
       try {
         const parts = (selectedWeekDate || todayStr).split('-').map(Number);
@@ -1144,13 +1237,24 @@ const ReportsModule = ({ user, onNavigateHome }) => {
         const s = `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
         const e = `${sunday.getFullYear()}-${String(sunday.getMonth() + 1).padStart(2, '0')}-${String(sunday.getDate()).padStart(2, '0')}`;
         return safeAllTx.filter(t => t.dateStr >= s && t.dateStr <= e && t.status !== 'VOIDED');
-      } catch (err) { return safeAllTx.filter(t => t.dateStr === todayStr && t.status !== 'VOIDED'); }
+      } catch (err) { console.warn(err); return safeAllTx.filter(t => t.dateStr === todayStr && t.status !== 'VOIDED'); }
     }
     return safeAllTx.filter(t => t.dateStr?.startsWith(selectedMonthStr) && t.status !== 'VOIDED');
-  }, [reportTab, todaySubMode, selectedDate, selectedWeekDate, selectedMonthStr, safeAllTx, activeDateStr, todayStr]);
+  }, [reportTab, todaySubMode, selectedDate, selectedWeekDate, selectedMonthStr, rangeStart, rangeEnd, safeAllTx, activeDateStr, todayStr]);
 
   const totalOmset = activeTx.filter(t => t.unitPrice !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
   const totalFocVol = activeTx.filter(t => t.unitPrice === 0).reduce((s, t) => s + (t.quantity || 1), 0);
+
+  // FOC Valuation Calculation
+  const totalFocValuation = activeTx.filter(t => t.unitPrice === 0).reduce((sum, t) => {
+    let standardPrice = 0;
+    if (t.divisionType === 'GAS_INDUSTRI') {
+      standardPrice = gasMasterConfig[t.gasProduct] || 150000;
+    } else {
+      standardPrice = masterPrices[t.divisionType] || 20000;
+    }
+    return sum + ((t.quantity || 1) * standardPrice);
+  }, 0);
 
   const divs = [
     { key: 'TANDON', name: 'Air Tandon', bg: 'bg-blue-600', txt: 'text-blue-600', unitLabel: 'Tandon' },
@@ -1172,6 +1276,9 @@ const ReportsModule = ({ user, onNavigateHome }) => {
   });
   const maxDivRev = Math.max(...divRevenues.map(d => d.rev), 1000);
 
+  // Apply Trend Filter
+  const filteredAllTx = selectedTrendDiv === 'ALL' ? safeAllTx : safeAllTx.filter(t => t.divisionType === selectedTrendDiv);
+
   const weeklyData = useMemo(() => {
     if (reportTab !== 'WEEK') return [];
     try {
@@ -1182,11 +1289,11 @@ const ReportsModule = ({ user, onNavigateHome }) => {
       return ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'].map((n, i) => {
         const td = new Date(monday); td.setDate(monday.getDate() + i);
         const ds = `${td.getFullYear()}-${String(td.getMonth() + 1).padStart(2, '0')}-${String(td.getDate()).padStart(2, '0')}`;
-        const dayTx = safeAllTx.filter(t => t.dateStr === ds && t.status !== 'VOIDED');
+        const dayTx = filteredAllTx.filter(t => t.dateStr === ds && t.status !== 'VOIDED');
         return { name: n, ds, omset: dayTx.filter(t => t.unitPrice !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0) };
       });
-    } catch(e) { return []; }
-  }, [selectedWeekDate, safeAllTx, reportTab, todayStr]);
+    } catch(e) { console.warn(e); return []; }
+  }, [selectedWeekDate, filteredAllTx, reportTab, todayStr]);
 
   const maxWeek = Math.max(...weeklyData.map(w => w.omset), 10000);
 
@@ -1199,12 +1306,12 @@ const ReportsModule = ({ user, onNavigateHome }) => {
       let res = [];
       for (let i = 1; i <= days; i++) {
         const ds = `${yr}-${String(mo).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
-        const txs = safeAllTx.filter(t => t.dateStr === ds && t.status !== 'VOIDED');
+        const txs = filteredAllTx.filter(t => t.dateStr === ds && t.status !== 'VOIDED');
         res.push({ day: i, ds, omset: txs.filter(t => t.unitPrice !== 0).reduce((s,t) => s + (t.totalAmount||0), 0) });
       }
       return res;
-    } catch(e) { return []; }
-  }, [selectedMonthStr, safeAllTx, reportTab]);
+    } catch(e) { console.warn(e); return []; }
+  }, [selectedMonthStr, filteredAllTx, reportTab]);
 
   const maxMo = Math.max(...monthData.map(m => m.omset), 10000);
 
@@ -1214,9 +1321,39 @@ const ReportsModule = ({ user, onNavigateHome }) => {
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
   };
 
+  const handleExportCSV = () => {
+    if (activeTx.length === 0) return alert("Tidak ada data untuk diekspor pada periode ini.");
+    
+    const headers = ["ID Transaksi", "Tanggal", "Jam (WITA)", "Divisi", "Pelanggan / Kapal", "Produk Gas", "Volume (Qty)", "Harga Satuan (Rp)", "Total Penjualan (Rp)", "Operator", "Status"];
+    const rows = activeTx.map(t => [
+      t.id,
+      t.dateStr,
+      getMakassarTimeString(t.timestamp),
+      t.divisionType,
+      `"${t.entityName || ''}"`,
+      t.gasProduct || '-',
+      t.quantity,
+      t.unitPrice,
+      t.totalAmount || 0,
+      `"${t.operatorName || ''}"`,
+      t.status
+    ]);
+
+    const csvContent = [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Export_POS_${reportTab}_${Date.now()}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="max-w-md sm:max-w-2xl mx-auto px-3 sm:px-4 py-4 pb-24 space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <Button variant="outline" onClick={onNavigateHome} className="p-2.5 rounded-xl border-slate-200"><ArrowLeft size={18}/></Button>
           <div>
@@ -1224,13 +1361,17 @@ const ReportsModule = ({ user, onNavigateHome }) => {
             <h1 className="text-xl font-black flex items-center gap-1.5"><PieChart size={20} className="text-emerald-600" /> Penjualan</h1>
           </div>
         </div>
-        <Button variant="emerald" onClick={handleWhatsAppShare} className="py-2 px-3 text-xs shadow-md"><Share2 size={15} /> Kirim WA</Button>
+        <div className="flex gap-2 w-full sm:w-auto">
+          <Button variant="outline" onClick={handleExportCSV} className="py-2 px-3 text-xs flex-1 sm:flex-none border-slate-300 bg-white"><Download size={15} /> CSV</Button>
+          <Button variant="emerald" onClick={handleWhatsAppShare} className="py-2 px-3 text-xs shadow-md flex-1 sm:flex-none"><Share2 size={15} /> Kirim WA</Button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-1 bg-slate-200 p-1 rounded-2xl text-xs font-extrabold shadow-inner">
-        <button onClick={() => {setReportTab('TODAY'); setSelectedDiv(null);}} className={`py-2.5 rounded-xl transition-all cursor-pointer ${reportTab==='TODAY'?'bg-emerald-600 text-white shadow-md':'text-slate-700'}`}>Hari Ini</button>
-        <button onClick={() => {setReportTab('WEEK'); setSelectedDiv(null);}} className={`py-2.5 rounded-xl transition-all cursor-pointer ${reportTab==='WEEK'?'bg-emerald-600 text-white shadow-md':'text-slate-700'}`}>Minggu Ini</button>
-        <button onClick={() => {setReportTab('MONTH'); setSelectedDiv(null);}} className={`py-2.5 rounded-xl transition-all cursor-pointer ${reportTab==='MONTH'?'bg-emerald-600 text-white shadow-md':'text-slate-700'}`}>Bulan Ini</button>
+      <div className="grid grid-cols-4 gap-1 bg-slate-200 p-1 rounded-2xl text-xs font-extrabold shadow-inner overflow-x-auto min-w-full">
+        <button onClick={() => {setReportTab('TODAY'); setSelectedDiv(null);}} className={`py-2 px-1 rounded-xl transition-all cursor-pointer whitespace-nowrap ${reportTab==='TODAY'?'bg-emerald-600 text-white shadow-md':'text-slate-700'}`}>Hari Ini</button>
+        <button onClick={() => {setReportTab('WEEK'); setSelectedDiv(null);}} className={`py-2 px-1 rounded-xl transition-all cursor-pointer whitespace-nowrap ${reportTab==='WEEK'?'bg-emerald-600 text-white shadow-md':'text-slate-700'}`}>Minggu</button>
+        <button onClick={() => {setReportTab('MONTH'); setSelectedDiv(null);}} className={`py-2 px-1 rounded-xl transition-all cursor-pointer whitespace-nowrap ${reportTab==='MONTH'?'bg-emerald-600 text-white shadow-md':'text-slate-700'}`}>Bulan</button>
+        <button onClick={() => {setReportTab('RANGE'); setSelectedDiv(null);}} className={`py-2 px-1 rounded-xl transition-all cursor-pointer whitespace-nowrap ${reportTab==='RANGE'?'bg-emerald-600 text-white shadow-md':'text-slate-700'}`}>Rentang</button>
       </div>
 
       <Card className="p-4 space-y-4 border-slate-200 shadow-sm">
@@ -1255,12 +1396,25 @@ const ReportsModule = ({ user, onNavigateHome }) => {
             <input type="month" value={selectedMonthStr} onChange={e=>setSelectedMonthStr(e.target.value)} className="p-1.5 bg-slate-50 border rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500 outline-none" onWheel={(e)=>e.target.blur()} />
           </div>
         )}
+        {reportTab === 'RANGE' && (
+          <div className="flex flex-col gap-2 pb-3 border-b border-slate-100">
+             <span className="text-xs font-bold text-slate-700 uppercase">Rentang Waktu Khusus</span>
+             <div className="flex items-center gap-2 w-full">
+                <input type="date" value={rangeStart} onChange={e=>setRangeStart(e.target.value)} className="p-1.5 bg-slate-50 border rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500 outline-none flex-1 w-full" onWheel={(e)=>e.target.blur()} />
+                <span className="text-xs font-black text-slate-400">-</span>
+                <input type="date" value={rangeEnd} onChange={e=>setRangeEnd(e.target.value)} className="p-1.5 bg-slate-50 border rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500 outline-none flex-1 w-full" onWheel={(e)=>e.target.blur()} />
+             </div>
+          </div>
+        )}
 
         <div className="p-4 bg-emerald-600 text-white rounded-2xl space-y-1 shadow-md relative overflow-hidden">
           <div className="absolute top-0 right-0 p-4 opacity-10"><PieChart size={64}/></div>
           <div className="flex justify-between items-start relative z-10">
             <span className="text-[10px] font-bold text-emerald-200 uppercase tracking-wider block">TOTAL OMSET GABUNGAN (NON-FOC)</span>
-            {totalFocVol > 0 && <span className="text-[10px] font-extrabold bg-orange-500 text-white px-2 py-0.5 rounded shadow-xs">Total FOC: {totalFocVol}</span>}
+            <div className="text-right">
+              {totalFocVol > 0 && <span className="text-[10px] font-extrabold bg-orange-500 text-white px-2 py-0.5 rounded shadow-xs block mb-1">Total Volume FOC: {totalFocVol}</span>}
+              {totalFocValuation > 0 && <span className="text-[9px] font-bold text-orange-200 bg-black/20 px-1.5 py-0.5 rounded">Valuasi FOC: Rp {totalFocValuation.toLocaleString('id-ID')}</span>}
+            </div>
           </div>
           <div className="text-3xl font-black relative z-10">Rp {totalOmset.toLocaleString('id-ID')}</div>
         </div>
@@ -1322,41 +1476,45 @@ const ReportsModule = ({ user, onNavigateHome }) => {
           </div>
         )}
 
-        {reportTab === 'WEEK' && (
-          <div className="pt-4 border-t border-slate-100 animate-in fade-in">
-            <h3 className="font-extrabold text-xs uppercase mb-2">Tren Mingguan</h3>
-            <div className="grid grid-cols-7 gap-1 items-end h-32 pt-6 pb-2 px-2 bg-slate-50 rounded-xl border border-slate-200">
-              {weeklyData.map(w => {
-                const hp = maxWeek > 0 ? Math.max(Math.round((w.omset/maxWeek)*100),6) : 6;
-                const isSel = w.ds === selectedWeekDate;
-                return (
-                  <div key={w.name} onClick={()=>setSelectedWeekDate(w.ds)} className="flex flex-col items-center gap-1 h-full justify-end cursor-pointer group">
-                    <span className="text-[9px] font-bold text-slate-500 opacity-0 group-hover:opacity-100 transition-all">{w.omset>0?`${Math.round(w.omset/1000)}k`:'0'}</span>
-                    <div className={`w-full rounded-t-lg transition-all ${isSel?'bg-emerald-600 shadow-md':'bg-emerald-300'}`} style={{height:`${hp}%`}}></div>
-                    <span className={`text-[10px] font-bold ${isSel?'text-emerald-700 font-black':'text-slate-600'}`}>{w.name.slice(0,3)}</span>
-                  </div>
-                );
-              })}
+        {(reportTab === 'WEEK' || reportTab === 'MONTH') && (
+          <div className="pt-4 border-t border-slate-100 animate-in fade-in space-y-2">
+            <div className="flex justify-between items-center">
+               <h3 className="font-extrabold text-xs uppercase">Tren Harian</h3>
+               <select value={selectedTrendDiv} onChange={e=>setSelectedTrendDiv(e.target.value)} className="p-1.5 bg-slate-100 border border-slate-200 rounded-lg text-[10px] font-bold outline-none cursor-pointer text-slate-700">
+                  <option value="ALL">Semua Divisi (Gabungan)</option>
+                  {divs.map(d => <option key={d.key} value={d.key}>{d.name}</option>)}
+               </select>
             </div>
-          </div>
-        )}
-
-        {reportTab === 'MONTH' && (
-          <div className="pt-4 border-t border-slate-100 animate-in fade-in">
-            <h3 className="font-extrabold text-xs uppercase mb-2">Tren Bulanan (Harian)</h3>
-            <div className="overflow-x-auto pb-2">
-              <div className="flex gap-1 items-end h-36 pt-6 pb-2 px-2 bg-slate-50 rounded-xl border border-slate-200 min-w-max">
-                {monthData.map(m => {
-                  const hp = maxMo > 0 ? Math.max(Math.round((m.omset/maxMo)*100),6) : 6;
-                  return (
-                    <div key={m.day} className="flex flex-col items-center gap-1 h-full justify-end w-6 group cursor-pointer" title={`${m.ds}: Rp ${m.omset.toLocaleString()}`}>
-                      <div className="w-4 rounded-t transition-colors bg-emerald-400 group-hover:bg-emerald-600" style={{height:`${hp}%`}}></div>
-                      <span className="text-[9px] font-bold text-slate-600">{m.day}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            
+            {reportTab === 'WEEK' ? (
+               <div className="grid grid-cols-7 gap-1 items-end h-32 pt-6 pb-2 px-2 bg-slate-50 rounded-xl border border-slate-200">
+                 {weeklyData.map(w => {
+                   const hp = maxWeek > 0 ? Math.max(Math.round((w.omset/maxWeek)*100),6) : 6;
+                   const isSel = w.ds === selectedWeekDate;
+                   return (
+                     <div key={w.name} onClick={()=>setSelectedWeekDate(w.ds)} className="flex flex-col items-center gap-1 h-full justify-end cursor-pointer group">
+                       <span className="text-[9px] font-bold text-slate-500 opacity-0 group-hover:opacity-100 transition-all">{w.omset>0?`${Math.round(w.omset/1000)}k`:'0'}</span>
+                       <div className={`w-full rounded-t-lg transition-all ${isSel?'bg-emerald-600 shadow-md':'bg-emerald-300'}`} style={{height:`${hp}%`}}></div>
+                       <span className={`text-[10px] font-bold ${isSel?'text-emerald-700 font-black':'text-slate-600'}`}>{w.name.slice(0,3)}</span>
+                     </div>
+                   );
+                 })}
+               </div>
+            ) : (
+               <div className="overflow-x-auto pb-2">
+                 <div className="flex gap-1 items-end h-36 pt-6 pb-2 px-2 bg-slate-50 rounded-xl border border-slate-200 min-w-max">
+                   {monthData.map(m => {
+                     const hp = maxMo > 0 ? Math.max(Math.round((m.omset/maxMo)*100),6) : 6;
+                     return (
+                       <div key={m.day} className="flex flex-col items-center gap-1 h-full justify-end w-6 group cursor-pointer" title={`${m.ds}: Rp ${m.omset.toLocaleString()}`}>
+                         <div className="w-4 rounded-t transition-colors bg-emerald-400 group-hover:bg-emerald-600" style={{height:`${hp}%`}}></div>
+                         <span className="text-[9px] font-bold text-slate-600">{m.day}</span>
+                       </div>
+                     );
+                   })}
+                 </div>
+               </div>
+            )}
           </div>
         )}
       </Card>
@@ -1410,29 +1568,21 @@ const AdminPanel = ({ onNavigateHome }) => {
   const [promptPassword, setPromptPassword] = useState('');
   const [promptError, setPromptError] = useState('');
 
-  const custConfigs = {
-    TANDON: { key: 'tandon_drivers', nameField: 'name', prefix: 'td', label: 'Sopir Tandon', priceKey: 'TANDON' },
-    TANGKI: { key: 'tangki_customers', nameField: 'name', prefix: 'mt', label: 'Pembeli Mobil Tangki', priceKey: 'TANGKI' },
-    GALLON: { key: 'gallon_customers', nameField: 'name', prefix: 'gl', label: 'Pembeli Air Gallon', priceKey: 'GALLON' },
-    KAPAL: { key: 'kapal_ships', nameField: 'shipName', prefix: 'ak', label: 'Kapal', priceKey: 'KAPAL' },
-    GAS: { key: 'gas_customers', nameField: 'name', prefix: 'gs', label: 'Gas Industri', priceKey: 'GAS' }
-  };
-
   useEffect(() => {
     let unsubs = [];
     try {
-      unsubs.push(onSnapshot(getDocPath('settings', 'tandon_config'), snap => { if(snap.exists()) setPrices(p=>({...p, TANDON: snap.data().price??20000})); }, ()=>{}));
-      unsubs.push(onSnapshot(getDocPath('settings', 'gallon_config'), snap => { if(snap.exists()) setPrices(p=>({...p, GALLON: snap.data().price??6000})); }, ()=>{}));
-      unsubs.push(onSnapshot(getDocPath('settings', 'tangki_config'), snap => { if(snap.exists()) setPrices(p=>({...p, TANGKI: snap.data().price??350000})); }, ()=>{}));
-      unsubs.push(onSnapshot(getDocPath('settings', 'kapal_config'), snap => { if(snap.exists()) setPrices(p=>({...p, KAPAL: snap.data().price??50000})); }, ()=>{}));
-      unsubs.push(onSnapshot(getDocPath('settings', 'gas_config'), snap => { if(snap.exists() && snap.data().products) { setGasProducts(snap.data().products); } }, ()=>{}));
-    } catch(e){}
+      unsubs.push(onSnapshot(getDocPath('settings', 'tandon_config'), snap => { if(snap.exists()) setPrices(p=>({...p, TANDON: snap.data().price??20000})); }, (err)=>{ console.warn(err); }));
+      unsubs.push(onSnapshot(getDocPath('settings', 'gallon_config'), snap => { if(snap.exists()) setPrices(p=>({...p, GALLON: snap.data().price??6000})); }, (err)=>{ console.warn(err); }));
+      unsubs.push(onSnapshot(getDocPath('settings', 'tangki_config'), snap => { if(snap.exists()) setPrices(p=>({...p, TANGKI: snap.data().price??350000})); }, (err)=>{ console.warn(err); }));
+      unsubs.push(onSnapshot(getDocPath('settings', 'kapal_config'), snap => { if(snap.exists()) setPrices(p=>({...p, KAPAL: snap.data().price??50000})); }, (err)=>{ console.warn(err); }));
+      unsubs.push(onSnapshot(getDocPath('settings', 'gas_config'), snap => { if(snap.exists() && snap.data().products) { setGasProducts(snap.data().products); } }, (err)=>{ console.warn(err); }));
+    } catch(e){ console.warn(e); }
     return () => unsubs.forEach(u => u && u());
   }, []);
 
   useEffect(() => {
     if (activeCategory !== 'CUSTOMER') return;
-    const conf = custConfigs[activeCustTab];
+    const conf = CUST_CONFIGS[activeCustTab];
     const initialLocal = getLocalData(conf.key, []);
     setCustData(Array.isArray(initialLocal) ? initialLocal.map(c => ({...c, price: (c.price === '' || c.price === null || c.price === undefined) ? null : c.price})) : []);
 
@@ -1443,7 +1593,7 @@ const AdminPanel = ({ onNavigateHome }) => {
         setCustData(normalized); 
         setLocalData(conf.key, normalized); 
       }
-    }, () => {});
+    }, (err) => { console.warn(err); });
     return () => unsub();
   }, [activeCategory, activeCustTab]);
 
@@ -1451,7 +1601,7 @@ const AdminPanel = ({ onNavigateHome }) => {
     if (!canManageCredentials) return;
     const v = val === '' ? 0 : parseInt(val);
     setPrices(p => ({...p, [key]: isNaN(v) ? 0 : v}));
-    try { await setDoc(getDocPath('settings', confKey), { price: isNaN(v) ? 0 : v, updatedBy: sessionUser.name, updatedAt: Date.now() }, { merge: true }); } catch(e){}
+    try { await setDoc(getDocPath('settings', confKey), { price: isNaN(v) ? 0 : v, updatedBy: sessionUser.name, updatedAt: Date.now() }, { merge: true }); } catch(e){ console.warn(e); }
   };
 
   const updateGasProductPrice = async (prodName, val) => {
@@ -1459,7 +1609,7 @@ const AdminPanel = ({ onNavigateHome }) => {
     const v = val === '' ? 0 : parseInt(val);
     const updatedProducts = { ...gasProducts, [prodName]: isNaN(v) ? 0 : v };
     setGasProducts(updatedProducts);
-    try { await setDoc(getDocPath('settings', 'gas_config'), { products: updatedProducts, updatedBy: sessionUser.name, updatedAt: Date.now() }, { merge: true }); } catch(e){}
+    try { await setDoc(getDocPath('settings', 'gas_config'), { products: updatedProducts, updatedBy: sessionUser.name, updatedAt: Date.now() }, { merge: true }); } catch(e){ console.warn(e); }
   };
 
   const generateUniqueUsername = (baseName, existingList, nameKey, currentId = null) => {
@@ -1479,12 +1629,12 @@ const AdminPanel = ({ onNavigateHome }) => {
   };
 
   const openEditCust = (c) => {
-    const nameKey = custConfigs[activeCustTab].nameField;
+    const nameKey = CUST_CONFIGS[activeCustTab];
     const rawPrice = c.price;
     const hasValidPrice = rawPrice !== undefined && rawPrice !== null && rawPrice !== '' && !isNaN(Number(rawPrice));
     const customPriceInput = hasValidPrice ? rawPrice : '';
     setCustForm({
-        name: c[nameKey] || '', address: c.address || '', whatsapp: c.whatsapp || '', username: c.username || '',
+        name: c[nameKey.nameField] || '', address: c.address || '', whatsapp: c.whatsapp || '', username: c.username || '',
         companyName: c.companyName || '', agentName: c.agentName || '', customerType: c.customerType || 'PENGGUNA',
         resellerName: c.resellerName || '', customPrice: customPriceInput, gasCustomPrices: c.gasCustomPrices || {}
     });
@@ -1496,7 +1646,7 @@ const AdminPanel = ({ onNavigateHome }) => {
     const cleanName = custForm.name.trim().toUpperCase();
     if (!cleanName) return setCustError('Nama wajib diisi.');
 
-    const conf = custConfigs[activeCustTab];
+    const conf = CUST_CONFIGS[activeCustTab];
     const nameKey = conf.nameField;
     const safeCustData = Array.isArray(custData) ? custData : [];
     if (safeCustData.some(c => (c[nameKey] || '').toUpperCase() === cleanName && c.id !== editingCust?.id)) return setCustError(`Nama "${cleanName}" sudah terdaftar.`);
@@ -1519,10 +1669,10 @@ const AdminPanel = ({ onNavigateHome }) => {
         }
       });
       payload.gasCustomPrices = cleanGasPrices;
-      payload.price = null; // Explicitly null so Firestore saves properly
+      payload.price = null; 
     } else {
       const hasInputPrice = custForm.customPrice !== undefined && custForm.customPrice !== null && custForm.customPrice !== '' && !isNaN(Number(custForm.customPrice));
-      payload.price = hasInputPrice ? Number(custForm.customPrice) : null; // Explicitly null so Firestore saves properly
+      payload.price = hasInputPrice ? Number(custForm.customPrice) : null; 
     }
 
     if (activeCustTab === 'TANGKI' || activeCustTab === 'GAS') payload.companyName = custForm.companyName.trim();
@@ -1545,7 +1695,7 @@ const AdminPanel = ({ onNavigateHome }) => {
     try {
         if (editingCust) await updateDoc(getDocPath(conf.key, editingCust.id), payload);
         else await setDoc(getDocPath(conf.key, payload.id), payload);
-    } catch(err) {}
+    } catch(err) { console.warn(err); }
   };
 
   const handleAddOrUpdateInternalUser = async (e) => {
@@ -1573,7 +1723,7 @@ const AdminPanel = ({ onNavigateHome }) => {
     try { 
       if (editingUser) await updateDoc(getDocPath('users', userId), newUserObj);
       else await setDoc(getDocPath('users', userId), newUserObj); 
-    } catch(e) {}
+    } catch(e) { console.warn(e); }
   };
 
   const openEditUser = (u) => {
@@ -1583,7 +1733,7 @@ const AdminPanel = ({ onNavigateHome }) => {
 
   const togglePortalAccess = async (cust) => {
     if (!canManageCredentials) return;
-    const conf = custConfigs[activeCustTab];
+    const conf = CUST_CONFIGS[activeCustTab];
     const isCurrentlyEnabled = cust.portalAccessEnabled === true;
     const newStatus = !isCurrentlyEnabled;
 
@@ -1599,7 +1749,7 @@ const AdminPanel = ({ onNavigateHome }) => {
 
     const updated = custData.map(c => c.id === cust.id ? { ...c, portalAccessEnabled: newStatus } : c);
     setCustData(updated); setLocalData(conf.key, updated);
-    try { await updateDoc(getDocPath(conf.key, cust.id), { portalAccessEnabled: newStatus }); } catch(e) {}
+    try { await updateDoc(getDocPath(conf.key, cust.id), { portalAccessEnabled: newStatus }); } catch(e) { console.warn(e); }
   };
 
   const handleCredentialPromptSubmit = async (e) => {
@@ -1623,7 +1773,7 @@ const AdminPanel = ({ onNavigateHome }) => {
 
     try {
       await updateDoc(getDocPath(confKey, cust.id), payload);
-    } catch(err) {}
+    } catch(err) { console.warn(err); }
   };
 
   const handleResetSubmit = async (e) => {
@@ -1651,7 +1801,7 @@ const AdminPanel = ({ onNavigateHome }) => {
     }
   };
 
-  const currConf = custConfigs[activeCustTab];
+  const currConf = CUST_CONFIGS[activeCustTab];
   const activeFormLabel = activeCustTab === 'TANDON' ? 'Nama Supir' : activeCustTab === 'KAPAL' ? 'Nama Kapal' : 'Nama Pembeli';
   const filteredCustData = custData.filter(c => {
     const term = searchCust.toLowerCase();
@@ -1743,9 +1893,9 @@ const AdminPanel = ({ onNavigateHome }) => {
           <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
             {filteredCustData.length === 0 ? <p className="text-xs text-emerald-600 text-center py-6 italic">Belum ada data akun.</p> : (
               filteredCustData.map(c => {
-                const nameKey = custConfigs[activeCustTab].nameField;
+                const nameKey = CUST_CONFIGS[activeCustTab].nameField;
                 const isEnabled = c.portalAccessEnabled === true;
-                const activeMasterPrice = activeCustTab === 'GAS' ? 150000 : (prices[custConfigs[activeCustTab].priceKey] ?? 0);
+                const activeMasterPrice = activeCustTab === 'GAS' ? 150000 : (prices[CUST_CONFIGS[activeCustTab].priceKey] ?? 0);
                 let displayPriceText = "";
                 if (activeCustTab === 'GAS') {
                   const hasCustom = c.gasCustomPrices && Object.keys(c.gasCustomPrices).length > 0;
@@ -1776,7 +1926,7 @@ const AdminPanel = ({ onNavigateHome }) => {
                           {isEnabled ? <Ban size={15}/> : <Check size={15}/>}
                         </button>
                         {canResetPassword && c.username && c.password && (
-                          <button onClick={()=>{setResetTarget({data: c, type: 'CUSTOMER', confKey: custConfigs[activeCustTab].key}); setResetPwd(generateSecurePassword(c.username)); setResetMsg('');}} title="Reset Password" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Key size={15}/></button>
+                          <button onClick={()=>{setResetTarget({data: c, type: 'CUSTOMER', confKey: CUST_CONFIGS[activeCustTab].key}); setResetPwd(generateSecurePassword(c.username)); setResetMsg('');}} title="Reset Password" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Key size={15}/></button>
                         )}
                       </div>
                     )}
@@ -1999,13 +2149,6 @@ const DivisionSelector = ({ user, onSelectDivision }) => {
 
   return (
     <div className="max-w-md sm:max-w-xl mx-auto px-4 py-6 space-y-5 pb-24">
-      <div className="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-emerald-100">
-        <GalanganKalimasLogo size="sm" />
-        <div className="text-right">
-          <p className="text-xs font-black uppercase text-slate-900">{user.name}</p>
-          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">{user.role}</span>
-        </div>
-      </div>
       <div className="space-y-3">
         <h3 className="text-xs font-extrabold text-slate-500 uppercase">Divisi Penjualan POS</h3>
         <div className="grid gap-3">
@@ -2052,9 +2195,15 @@ const MainApp = () => {
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 font-sans">
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-40 px-4 py-3 flex justify-between items-center shadow-xs">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-40 px-3 sm:px-4 py-2.5 flex justify-between items-center shadow-xs">
         <GalanganKalimasLogo size="sm" />
-        <button onClick={logout} className="p-2 bg-red-50 text-red-600 rounded-xl shadow-xs cursor-pointer"><LogOut size={16} /></button>
+        <div className="flex items-center gap-2.5 sm:gap-3">
+          <div className="text-right flex flex-col items-end justify-center">
+            <span className="text-[10px] font-black uppercase text-slate-900 leading-tight">{sessionUser.name}</span>
+            <span className="text-[8px] font-bold px-1.5 py-0.5 rounded text-emerald-800 bg-emerald-100 leading-none mt-0.5">{sessionUser.role}</span>
+          </div>
+          <button onClick={logout} className="p-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl shadow-xs cursor-pointer transition-colors"><LogOut size={16} /></button>
+        </div>
       </header>
       <main>
         {currentView === 'HOME' && <DivisionSelector user={sessionUser} onSelectDivision={setCurrentView} />}
@@ -2075,7 +2224,7 @@ export default function App() {
     <ErrorBoundary>
       <AuthProvider>
         <MainApp />
-        <Analytics />
+         <Analytics /> 
       </AuthProvider>
     </ErrorBoundary>
   );
