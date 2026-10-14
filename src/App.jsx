@@ -649,7 +649,7 @@ const DivisionSplitStatsCards = ({ todayVol, myTodayVol, todayRev, myTodayRev, t
   </div>
 );
 
-const PurchasePerformanceGraph = ({ txList = [], metric = 'VOLUME' }) => {
+const PurchasePerformanceGraph = ({ txList = [], metric = 'VOLUME', subtitle = '' }) => {
   const [viewMode, setViewMode] = useState('CUSTOMER');
   const [isViewAllOpen, setIsViewAllOpen] = useState(false);
 
@@ -681,9 +681,12 @@ const PurchasePerformanceGraph = ({ txList = [], metric = 'VOLUME' }) => {
   return (
     <Card className="p-4 space-y-3 bg-white border-slate-200 shadow-sm relative">
       <div className="flex justify-between items-center pb-2 border-b border-slate-100">
-        <h3 className="font-extrabold text-xs uppercase text-slate-800 flex items-center gap-1.5">
-          <PieChart size={15} className="text-emerald-600" /> Performa ({viewMode === 'CUSTOMER' ? 'Top Pelanggan' : 'Top Operator'})
-        </h3>
+        <div>
+          <h3 className="font-extrabold text-xs uppercase text-slate-800 flex items-center gap-1.5">
+            <PieChart size={15} className="text-emerald-600" /> Performa ({viewMode === 'CUSTOMER' ? 'Top Pelanggan' : 'Top Operator'})
+          </h3>
+          {subtitle && <span className="text-[9px] font-bold text-emerald-600 tracking-wide mt-0.5 block">{subtitle}</span>}
+        </div>
         <div className="flex items-center gap-2">
           <div className="flex bg-slate-100 p-0.5 rounded-lg text-[9px] font-bold">
             <button onClick={() => setViewMode('CUSTOMER')} className={`px-2 py-1 rounded transition-colors cursor-pointer ${viewMode === 'CUSTOMER' ? 'bg-white shadow-xs text-emerald-700' : 'text-slate-500'}`}>Pelanggan</button>
@@ -1200,6 +1203,7 @@ const ReportsModule = ({ user, onNavigateHome }) => {
   const [rangeEnd, setRangeEnd] = useState(() => getMakassarDateString());
   
   const [selectedDiv, setSelectedDiv] = useState(null);
+  const [selectedTrendDate, setSelectedTrendDate] = useState(null);
   const [allTx, setAllTx] = useState(() => getLocalData('transactions', []));
   
   // Master Prices for FOC Valuation
@@ -1372,10 +1376,10 @@ const ReportsModule = ({ user, onNavigateHome }) => {
       </div>
 
       <div className="grid grid-cols-4 gap-1 bg-slate-200 p-1 rounded-2xl text-xs font-extrabold shadow-inner overflow-x-auto min-w-full">
-        <button onClick={() => {setReportTab('TODAY'); setSelectedDiv(null);}} className={`py-2 px-1 rounded-xl transition-all cursor-pointer whitespace-nowrap ${reportTab==='TODAY'?'bg-emerald-600 text-white shadow-md':'text-slate-700'}`}>Hari Ini</button>
-        <button onClick={() => {setReportTab('WEEK'); setSelectedDiv(null);}} className={`py-2 px-1 rounded-xl transition-all cursor-pointer whitespace-nowrap ${reportTab==='WEEK'?'bg-emerald-600 text-white shadow-md':'text-slate-700'}`}>Minggu</button>
-        <button onClick={() => {setReportTab('MONTH'); setSelectedDiv(null);}} className={`py-2 px-1 rounded-xl transition-all cursor-pointer whitespace-nowrap ${reportTab==='MONTH'?'bg-emerald-600 text-white shadow-md':'text-slate-700'}`}>Bulan</button>
-        <button onClick={() => {setReportTab('RANGE'); setSelectedDiv(null);}} className={`py-2 px-1 rounded-xl transition-all cursor-pointer whitespace-nowrap ${reportTab==='RANGE'?'bg-emerald-600 text-white shadow-md':'text-slate-700'}`}>Rentang</button>
+        <button onClick={() => {setReportTab('TODAY'); setSelectedDiv(null); setSelectedTrendDate(null);}} className={`py-2 px-1 rounded-xl transition-all cursor-pointer whitespace-nowrap ${reportTab==='TODAY'?'bg-emerald-600 text-white shadow-md':'text-slate-700'}`}>Hari Ini</button>
+        <button onClick={() => {setReportTab('WEEK'); setSelectedDiv(null); setSelectedTrendDate(null);}} className={`py-2 px-1 rounded-xl transition-all cursor-pointer whitespace-nowrap ${reportTab==='WEEK'?'bg-emerald-600 text-white shadow-md':'text-slate-700'}`}>Minggu</button>
+        <button onClick={() => {setReportTab('MONTH'); setSelectedDiv(null); setSelectedTrendDate(null);}} className={`py-2 px-1 rounded-xl transition-all cursor-pointer whitespace-nowrap ${reportTab==='MONTH'?'bg-emerald-600 text-white shadow-md':'text-slate-700'}`}>Bulan</button>
+        <button onClick={() => {setReportTab('RANGE'); setSelectedDiv(null); setSelectedTrendDate(null);}} className={`py-2 px-1 rounded-xl transition-all cursor-pointer whitespace-nowrap ${reportTab==='RANGE'?'bg-emerald-600 text-white shadow-md':'text-slate-700'}`}>Rentang</button>
       </div>
 
       <Card className="p-4 space-y-4 border-slate-200 shadow-sm">
@@ -1424,7 +1428,10 @@ const ReportsModule = ({ user, onNavigateHome }) => {
         </div>
 
         <div className="pt-2">
-          <h3 className="font-extrabold text-xs uppercase text-slate-700 mb-2">Pendapatan Per Divisi <span className="text-[9px] text-slate-400 font-normal lowercase">(Klik grafik vertikal untuk detail)</span></h3>
+          <div className="flex justify-between items-center mb-2">
+            <h3 className="font-extrabold text-xs uppercase text-slate-700">Pendapatan Per Divisi <span className="text-[9px] text-slate-400 font-normal lowercase">(Klik grafik vertikal untuk detail)</span></h3>
+            {selectedDiv && <button onClick={()=>setSelectedDiv(null)} className="text-[9px] bg-slate-200 text-slate-600 px-2 py-1 rounded shadow-sm hover:bg-slate-300 transition-all font-bold cursor-pointer">Tutup Divisi</button>}
+          </div>
           <div className="flex justify-around items-end h-48 pt-6 pb-2 px-2 bg-slate-50 rounded-xl border border-slate-200">
             {divRevenues.map(d => {
               const hp = maxDivRev > 0 ? Math.max(Math.round((d.rev/maxDivRev)*100), 5) : 5;
@@ -1444,42 +1451,6 @@ const ReportsModule = ({ user, onNavigateHome }) => {
           </div>
         </div>
 
-        {selectedDiv && (
-          <div className="space-y-2.5 pt-4 border-t border-slate-200 animate-in fade-in slide-in-from-top-2">
-            <div className="flex justify-between items-center mb-1">
-              <h3 className="font-extrabold text-xs uppercase flex items-center gap-1.5">
-                {divs.find(d=>d.key===selectedDiv)?.name} - Performa Operator
-              </h3>
-              <button onClick={()=>setSelectedDiv(null)} className="text-[10px] text-slate-500 bg-slate-100 px-2 py-1 rounded-md hover:bg-slate-200 font-bold transition-all cursor-pointer">Tutup</button>
-            </div>
-            {(() => {
-              const divTxs = activeTx.filter(t => t.divisionType === selectedDiv);
-              const opsMap = {};
-              divTxs.forEach(t => {
-                const op = t.operatorName || 'SYSTEM';
-                if (!opsMap[op]) opsMap[op] = { count: 0, omset: 0, vol: 0, foc: 0 };
-                opsMap[op].count++; 
-                if (t.unitPrice !== 0) opsMap[op].omset += (t.totalAmount||0); 
-                opsMap[op].vol += (t.quantity||1);
-                if (t.unitPrice === 0) opsMap[op].foc += (t.quantity||1);
-              });
-              const sortedOps = Object.entries(opsMap).sort((a,b) => b[1].omset - a[1].omset);
-              
-              if (sortedOps.length === 0) return <p className="text-xs text-slate-400 text-center py-4 border border-dashed rounded-xl bg-slate-50">Belum ada transaksi di divisi ini.</p>;
-
-              return sortedOps.map(([name, data]) => (
-                <div key={name} className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm flex justify-between items-center text-xs">
-                  <div>
-                    <span className="font-black uppercase text-slate-800 block">{name}</span>
-                    <span className="text-[10px] text-slate-500 font-medium">{data.count} Transaksi ({data.vol} {divs.find(d=>d.key===selectedDiv)?.unitLabel || 'Volume'}{data.foc > 0 ? ` • FOC: ${data.foc}` : ''})</span>
-                  </div>
-                  <span className="font-black text-emerald-600 text-sm">Rp {data.omset.toLocaleString('id-ID')}</span>
-                </div>
-              ));
-            })()}
-          </div>
-        )}
-
         {(reportTab === 'WEEK' || reportTab === 'MONTH') && (
           <div className="pt-4 border-t border-slate-100 animate-in fade-in space-y-2">
             <div className="flex justify-between items-center pb-2">
@@ -1492,9 +1463,9 @@ const ReportsModule = ({ user, onNavigateHome }) => {
                <div className="grid grid-cols-7 gap-1 items-end h-32 pt-6 pb-2 px-2 bg-slate-50 rounded-xl border border-slate-200">
                  {weeklyData.map(w => {
                    const hp = maxWeek > 0 ? Math.max(Math.round((w.omset/maxWeek)*100),6) : 6;
-                   const isSel = w.ds === selectedWeekDate;
+                   const isSel = w.ds === selectedTrendDate;
                    return (
-                     <div key={w.name} onClick={()=>setSelectedWeekDate(w.ds)} className="flex flex-col items-center gap-1 h-full justify-end cursor-pointer group">
+                     <div key={w.name} onClick={()=>setSelectedTrendDate(prev => prev === w.ds ? null : w.ds)} className="flex flex-col items-center gap-1 h-full justify-end cursor-pointer group">
                        <span className="text-[9px] font-bold text-slate-500 opacity-0 group-hover:opacity-100 transition-all">{w.omset>0?`${Math.round(w.omset/1000)}k`:'0'}</span>
                        <div className={`w-full rounded-t-lg transition-all ${isSel?'bg-emerald-600 shadow-md':'bg-emerald-300'}`} style={{height:`${hp}%`}}></div>
                        <span className={`text-[10px] font-bold ${isSel?'text-emerald-700 font-black':'text-slate-600'}`}>{w.name.slice(0,3)}</span>
@@ -1507,10 +1478,11 @@ const ReportsModule = ({ user, onNavigateHome }) => {
                  <div className="flex gap-1 items-end h-36 pt-6 pb-2 px-2 bg-slate-50 rounded-xl border border-slate-200 min-w-max">
                    {monthData.map(m => {
                      const hp = maxMo > 0 ? Math.max(Math.round((m.omset/maxMo)*100),6) : 6;
+                     const isSel = m.ds === selectedTrendDate;
                      return (
-                       <div key={m.day} className="flex flex-col items-center gap-1 h-full justify-end w-6 group cursor-pointer" title={`${m.ds}: Rp ${m.omset.toLocaleString()}`}>
-                         <div className="w-4 rounded-t transition-colors bg-emerald-400 group-hover:bg-emerald-600" style={{height:`${hp}%`}}></div>
-                         <span className="text-[9px] font-bold text-slate-600">{m.day}</span>
+                       <div key={m.day} onClick={()=>setSelectedTrendDate(prev => prev === m.ds ? null : m.ds)} className="flex flex-col items-center gap-1 h-full justify-end w-6 group cursor-pointer" title={`${m.ds}: Rp ${m.omset.toLocaleString()}`}>
+                         <div className={`w-4 rounded-t transition-colors ${isSel ? 'bg-emerald-600 shadow-md' : 'bg-emerald-400 group-hover:bg-emerald-600'}`} style={{height:`${hp}%`}}></div>
+                         <span className={`text-[9px] font-bold ${isSel ? 'text-emerald-700 font-black' : 'text-slate-600'}`}>{m.day}</span>
                        </div>
                      );
                    })}
@@ -1521,10 +1493,23 @@ const ReportsModule = ({ user, onNavigateHome }) => {
         )}
       </Card>
       
-      <PurchasePerformanceGraph 
-        txList={selectedDiv ? activeTx.filter(t => t.divisionType === selectedDiv) : activeTx} 
-        metric={selectedDiv ? 'VOLUME' : 'OMSET'} 
-      />
+      {(() => {
+        const trendFilteredTx = selectedTrendDate
+          ? activeTx.filter(t => t.dateStr === selectedTrendDate)
+          : activeTx;
+        
+        const finalGraphTx = selectedDiv
+          ? trendFilteredTx.filter(t => t.divisionType === selectedDiv)
+          : trendFilteredTx;
+
+        return (
+          <PurchasePerformanceGraph 
+            txList={finalGraphTx} 
+            metric={selectedDiv ? 'VOLUME' : 'OMSET'} 
+            subtitle={selectedTrendDate ? `(Data: ${selectedTrendDate})` : ''}
+          />
+        );
+      })()}
     </div>
   );
 };
@@ -2229,7 +2214,7 @@ export default function App() {
     <ErrorBoundary>
       <AuthProvider>
         <MainApp />
-         <Analytics /> 
+        <Analytics />
       </AuthProvider>
     </ErrorBoundary>
   );
