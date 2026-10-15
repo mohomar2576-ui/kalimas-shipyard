@@ -28,10 +28,17 @@ const firebaseConfig = {
   appId: "1:330404051844:web:77e11003081143ff893bd1",
   measurementId: "G-TSSC1J1S0D"
 };
+
+// ==========================================
+// 2. FIREBASE INITIALIZATION
+// ==========================================
 const app = initializeApp(vercelFirebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof window !== 'undefined' && window.__app_id ? window.__app_id : 'default-kalimas-app';
+
+const getPublicPath = (collName) => collection(db, 'artifacts', appId, 'public', 'data', collName);
+const getDocPath = (collName, docId) => doc(db, 'artifacts', appId, 'public', 'data', collName, docId);
 
 let analytics = null;
 if (typeof window !== 'undefined' && isValidFirebaseConfig) {
@@ -239,7 +246,7 @@ const Modal = ({ isOpen, onClose, title, children }) => {
 };
 
 // ==========================================
-// 5. CONTEXT & AUTH (GLOBAL HYDRATION)
+// 5. CONTEXT & AUTH (GLOBAL HYDRATION - CHG-017)
 // ==========================================
 const AuthContext = createContext();
 
@@ -580,6 +587,7 @@ const CustomerPortal = ({ user, logout, isOnline = true }) => {
           <h1 className="font-black text-lg flex items-center gap-2">{user.name}</h1>
         </div>
         <div className="flex items-center gap-2">
+          {/* CHG-018: Real-time Online/Offline Status Badge */}
           <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border transition-all ${
             isOnline 
               ? 'bg-white/20 text-white border-white/30' 
@@ -1009,6 +1017,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     try { await setDoc(getDocPath(dbKeys.entity, newEntity.id), newEntity); } catch (err) { console.warn(err); }
   };
 
+  // CHG-016: Custom quantity input support for Galon and Kapal
   const getAddButtons = (entity) => {
     const lastMyTxForEntity = activeTx.slice().reverse().find(t => t.entityId === entity.id && t.operatorName === user.name && t.dateStr === todayStr && t.status !== 'VOIDED');
     let btns;
@@ -1253,6 +1262,9 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   );
 };
 
+// ==========================================
+// 8. REPORTS MODULE
+// ==========================================
 const ReportsModule = ({ user, onNavigateHome }) => {
   const [reportTab, setReportTab] = useState('TODAY');
   const [todaySubMode, setTodaySubMode] = useState('TODAY');
@@ -1571,6 +1583,9 @@ const ReportsModule = ({ user, onNavigateHome }) => {
   );
 };
 
+// ==========================================
+// 9. ADMIN PANEL MODULE
+// ==========================================
 const AdminPanel = ({ onNavigateHome }) => {
   const { sessionUser, allUsers, setAllUsers } = useContext(AuthContext);
   const [activeCategory, setActiveCategory] = useState('INTERNAL'); 
@@ -1823,6 +1838,7 @@ const AdminPanel = ({ onNavigateHome }) => {
     } catch(err) { console.warn(err); }
   };
 
+  // CHG-015: Un-blockable password update with non-blocking async cloud sync
   const handleResetSubmit = async (e) => {
     e.preventDefault();
     if (!canResetPassword || !resetTarget) return;
@@ -1838,7 +1854,7 @@ const AdminPanel = ({ onNavigateHome }) => {
         const updated = allUsers.map(u => u.id === resetTarget.data.id ? { ...u, password: finalPwd } : u);
         setAllUsers(updated); setLocalData('all_users', updated);
         
-        // CHG-015 Fire and forget (Removes offline hanging promise)
+        // Non-blocking fire and forget
         updateDoc(getDocPath('users', resetTarget.data.id), { password: finalPwd }).catch(err=>console.warn(err));
       } else {
         const confKey = resetTarget.confKey;
@@ -1847,7 +1863,7 @@ const AdminPanel = ({ onNavigateHome }) => {
         const updated = custData.map(c => c.id === resetTarget.data.id ? { ...c, password: finalPwd } : c);
         setCustData(updated); setLocalData(confKey, updated);
         
-        // CHG-015 Fire and forget (Removes offline hanging promise)
+        // Non-blocking fire and forget
         updateDoc(getDocPath(confKey, resetTarget.data.id), { password: finalPwd }).catch(err=>console.warn(err));
       }
       
@@ -2193,6 +2209,9 @@ const AdminPanel = ({ onNavigateHome }) => {
   );
 };
 
+// ==========================================
+// 10. MAIN APP & ROUTING
+// ==========================================
 const DivisionSelector = ({ user, onSelectDivision }) => {
   const isSuperOrMgmt = ['SUPER_ADMIN', 'MANAGEMENT'].includes(user.role);
   const divs = [
@@ -2245,6 +2264,7 @@ const MainApp = () => {
 
   useEffect(() => { setCurrentView('HOME'); }, [sessionUser?.id]);
 
+  // CHG-018: Real-time internet connectivity status monitoring
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -2268,6 +2288,7 @@ const MainApp = () => {
       <header className="bg-white border-b border-slate-200 sticky top-0 z-40 px-3 sm:px-4 py-2.5 flex justify-between items-center shadow-xs">
         <GalanganKalimasLogo size="sm" />
         <div className="flex items-center gap-2.5 sm:gap-3">
+          {/* CHG-018: Real-time Online/Offline Status Indicator Header Pill */}
           <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border transition-all ${
             isOnline 
               ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
