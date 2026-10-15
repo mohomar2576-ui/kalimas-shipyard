@@ -29,33 +29,39 @@ const firebaseConfig = {
   measurementId: "G-TSSC1J1S0D"
 };
 
+// Helper to verify if real credentials have been provided
+const isValidFirebaseConfig = Boolean(
+  vercelFirebaseConfig.apiKey && 
+  !vercelFirebaseConfig.apiKey.includes("PASTE_YOUR_") &&
+  vercelFirebaseConfig.projectId &&
+  !vercelFirebaseConfig.projectId.includes("PASTE_YOUR_")
+);
+
 // ==========================================
-// 2. SAFE FIREBASE INITIALIZATION
+// 2. SAFE FIREBASE INITIALIZATION (CRASH-PROOF)
 // ==========================================
-const app = getApps().length === 0 ? initializeApp(vercelFirebaseConfig) : getApp();
-const auth = getAuth(app);
-const db = getFirestore(app);
+let app = null;
+let auth = null;
+let db = null;
+let analytics = null;
 const appId = typeof window !== 'undefined' && window.__app_id ? window.__app_id : 'default-kalimas-app';
+
+try {
+  app = getApps().length === 0 ? initializeApp(vercelFirebaseConfig) : getApp();
+  auth = getAuth(app);
+  db = getFirestore(app);
+  
+  if (typeof window !== 'undefined' && isValidFirebaseConfig) {
+    isSupported().then((supported) => {
+      if (supported) analytics = getAnalytics(app);
+    }).catch(err => console.warn("Firebase Analytics not supported:", err));
+  }
+} catch (e) {
+  console.warn("Fatal Firebase Init Error (Falling back to offline mode):", e);
+}
 
 const getPublicPath = (collName) => collection(db, 'artifacts', appId, 'public', 'data', collName);
 const getDocPath = (collName, docId) => doc(db, 'artifacts', appId, 'public', 'data', collName, docId);
-
-let analytics = null;
-if (typeof window !== 'undefined' && isValidFirebaseConfig) {
-  try {
-    isSupported().then((supported) => {
-      if (supported) {
-        try {
-          analytics = getAnalytics(app);
-        } catch (e) {
-          console.warn("Firebase Analytics init error:", e);
-        }
-      }
-    }).catch((err) => console.warn("Firebase Analytics error:", err));
-  } catch (e) {
-    console.warn("Firebase Analytics check error:", e);
-  }
-}
 
 // ==========================================
 // 3. UTILITY FUNCTIONS & CONSTANTS
@@ -268,54 +274,58 @@ const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     let unsub = null;
+    let authUnsub = () => {};
+    
     const initAuth = async () => {
-      if (!isValidFirebaseConfig) return;
+      if (!isValidFirebaseConfig || !auth) return;
       try { await signInAnonymously(auth); } catch (err) { console.warn("Firebase Auth warning:", err); }
     };
     initAuth();
 
-    const authUnsub = onAuthStateChanged(auth, async (user) => {
-      if (user && isValidFirebaseConfig) {
-        try {
-          unsub = onSnapshot(getPublicPath('users'), (snap) => {
-            const list = snap.docs.map(d => {
-              const data = d.data();
-              const role = data.role || 'OPERATOR';
-              const isSuperOrMgmt = ['SUPER_ADMIN', 'MANAGEMENT'].includes(role);
-              return { 
-                ...data, 
-                id: d.id,
-                divisions: isSuperOrMgmt ? ['TANDON', 'GALLON', 'MOBIL_TANGKI', 'AIR_KAPAL', 'GAS_INDUSTRI'] : (data.divisions || ['TANDON'])
-              };
-            });
-            if (list.length > 0) {
-              setAllUsers(list); 
-              setLocalData('all_users', list);
-              setSystemInitialized(true); 
-              setLocalData('sys_init', true);
-              
-              if (sessionUser && !['DRIVER', 'CUSTOMER_TANGKI', 'CUSTOMER_GALLON', 'CUSTOMER_KAPAL', 'CUSTOMER_GAS'].includes(sessionUser.role)) {
-                const updatedUser = list.find(u => u.id === sessionUser.id);
-                if (updatedUser) {
-                  const isSuperOrMgmt = ['SUPER_ADMIN', 'MANAGEMENT'].includes(updatedUser.role);
-                  const normalizedUpdatedUser = {
-                    ...updatedUser,
-                    divisions: isSuperOrMgmt ? ['TANDON', 'GALLON', 'MOBIL_TANGKI', 'AIR_KAPAL', 'GAS_INDUSTRI'] : (updatedUser.divisions || ['TANDON'])
-                  };
-                  setSessionUser(normalizedUpdatedUser);
-                  setLocalData('session_user', normalizedUpdatedUser);
+    if (auth && db) {
+      authUnsub = onAuthStateChanged(auth, async (user) => {
+        if (user && isValidFirebaseConfig) {
+          try {
+            unsub = onSnapshot(getPublicPath('users'), (snap) => {
+              const list = snap.docs.map(d => {
+                const data = d.data();
+                const role = data.role || 'OPERATOR';
+                const isSuperOrMgmt = ['SUPER_ADMIN', 'MANAGEMENT'].includes(role);
+                return { 
+                  ...data, 
+                  id: d.id,
+                  divisions: isSuperOrMgmt ? ['TANDON', 'GALLON', 'MOBIL_TANGKI', 'AIR_KAPAL', 'GAS_INDUSTRI'] : (data.divisions || ['TANDON'])
+                };
+              });
+              if (list.length > 0) {
+                setAllUsers(list); 
+                setLocalData('all_users', list);
+                setSystemInitialized(true); 
+                setLocalData('sys_init', true);
+                
+                if (sessionUser && !['DRIVER', 'CUSTOMER_TANGKI', 'CUSTOMER_GALLON', 'CUSTOMER_KAPAL', 'CUSTOMER_GAS'].includes(sessionUser.role)) {
+                  const updatedUser = list.find(u => u.id === sessionUser.id);
+                  if (updatedUser) {
+                    const isSuperOrMgmt = ['SUPER_ADMIN', 'MANAGEMENT'].includes(updatedUser.role);
+                    const normalizedUpdatedUser = {
+                      ...updatedUser,
+                      divisions: isSuperOrMgmt ? ['TANDON', 'GALLON', 'MOBIL_TANGKI', 'AIR_KAPAL', 'GAS_INDUSTRI'] : (updatedUser.divisions || ['TANDON'])
+                    };
+                    setSessionUser(normalizedUpdatedUser);
+                    setLocalData('session_user', normalizedUpdatedUser);
+                  }
                 }
               }
-            }
-          }, (err) => { console.warn("Users sync error:", err); });
-        } catch (e) { console.warn("Users listener error:", e); }
-      } else if (isValidFirebaseConfig) {
-        try { signInAnonymously(auth); } catch (err) { console.warn("Firebase Auth warning:", err); }
-      }
-    });
+            }, (err) => { console.warn("Users sync error:", err); });
+          } catch (e) { console.warn("Users listener error:", e); }
+        } else if (isValidFirebaseConfig) {
+          try { signInAnonymously(auth); } catch (err) { console.warn("Firebase Auth warning:", err); }
+        }
+      });
+    }
 
     const handleFocus = () => { 
-      if (!isValidFirebaseConfig) return;
+      if (!isValidFirebaseConfig || !auth) return;
       try { auth.currentUser || signInAnonymously(auth); } catch (e) { console.warn("Focus auth error:", e); } 
     };
     if (typeof window !== 'undefined') {
@@ -338,7 +348,7 @@ const AuthProvider = ({ children }) => {
     }
     
     let txUnsub = null;
-    if (!isValidFirebaseConfig) return;
+    if (!isValidFirebaseConfig || !db) return;
 
     try {
       const isInternal = !['DRIVER', 'CUSTOMER_TANGKI', 'CUSTOMER_GALLON', 'CUSTOMER_KAPAL', 'CUSTOMER_GAS'].includes(sessionUser.role);
@@ -443,7 +453,7 @@ const SystemInitScreen = () => {
     setAllUsers([admin]); setLocalData('all_users', [admin]);
     setSystemInitialized(true); setLocalData('sys_init', true);
     
-    if (isValidFirebaseConfig) {
+    if (isValidFirebaseConfig && db) {
       try { 
         await setDoc(getDocPath('users', admin.id), admin); 
         const defaultConfigs = [
@@ -675,10 +685,10 @@ const CustomerPortal = ({ user, logout, isOnline = true }) => {
                 <div>
                   <p className={`font-black text-xs uppercase ${theme.txt}`}>{tx.dateStr} <span className="text-[10px] font-medium text-slate-500">({getMakassarTimeString(tx.timestamp)})</span></p>
                   {tx.gasProduct && <p className="text-[10px] font-bold text-orange-700">{tx.gasProduct}</p>}
-                  <p className="text-[10px] text-slate-600 mt-1">{tx.quantity} {theme.label} • Rp {(tx.unitPrice || 0).toLocaleString('id-ID')}/unit {tx.unitPrice === 0 && <span className="text-[9px] bg-orange-100 text-orange-700 px-1 py-0.5 rounded font-bold ml-1">FOC</span>}</p>
+                  <p className="text-[10px] text-slate-600 mt-1">{tx.quantity} {theme.label} • Rp {((tx.unitPrice) || 0).toLocaleString('id-ID')}/unit {tx.unitPrice === 0 && <span className="text-[9px] bg-orange-100 text-orange-700 px-1 py-0.5 rounded font-bold ml-1">FOC</span>}</p>
                 </div>
                 <div className="text-right">
-                  <p className="font-black text-slate-900">Rp {(tx.totalAmount || 0).toLocaleString('id-ID')}</p>
+                  <p className="font-black text-slate-900">Rp {((tx.totalAmount) || 0).toLocaleString('id-ID')}</p>
                 </div>
               </div>
             ))}
@@ -872,7 +882,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   useEffect(() => {
     let unsubs = [];
     const defaultFp = fallbackPrices[dbKeys.divType] || 20000;
-    if (!isValidFirebaseConfig) {
+    if (!isValidFirebaseConfig || !db) {
       setGlobalPrice(defaultFp);
       return;
     }
@@ -984,7 +994,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     setLastTxToast({ id: txId, name: entity.name || entity.shipName, qty, amount: unitPrice * qty });
     setTimeout(() => { setLastTxToast(prev => prev?.id === txId ? null : prev); }, 6000);
 
-    if (isValidFirebaseConfig) {
+    if (isValidFirebaseConfig && db) {
       try { await setDoc(getDocPath('transactions', txId), txPayload); } 
       catch (err) { console.warn("Firebase write warning (Offline mode active).", err); }
     }
@@ -996,7 +1006,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     setGlobalTransactions(updatedTxList); 
     setLocalData('transactions', updatedTxList);
     setLastTxToast(null);
-    if (isValidFirebaseConfig) {
+    if (isValidFirebaseConfig && db) {
       try { await updateDoc(getDocPath('transactions', txId), { status: 'VOIDED', voidedAt: Date.now(), voidedBy: user.name }); } catch(err){ console.warn(err); }
     }
   };
@@ -1033,7 +1043,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     setEntities(updatedEntities); setLocalData(dbKeys.entity, updatedEntities);
     setIsAddOpen(false);
     
-    if (isValidFirebaseConfig) {
+    if (isValidFirebaseConfig && db) {
       try { await setDoc(getDocPath(dbKeys.entity, newEntity.id), newEntity); } catch (err) { console.warn(err); }
     }
   };
@@ -1100,7 +1110,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
         <div className="bg-slate-900 text-white p-3 rounded-2xl shadow-xl flex items-center justify-between text-xs animate-in slide-in-from-top-2 border border-slate-700 z-50 sticky top-16 shadow-emerald-500/10">
           <div>
             <p className="font-extrabold uppercase text-emerald-400 flex items-center gap-1"><Check size={14}/> Berhasil Input: {lastTxToast.name}</p>
-            <p className="text-[10px] text-slate-300 mt-0.5">{lastTxToast.qty} {unitLabel} • Rp {(lastTxToast.amount || 0).toLocaleString('id-ID')}</p>
+            <p className="text-[10px] text-slate-300 mt-0.5">{lastTxToast.qty} {unitLabel} • Rp {((lastTxToast.amount) || 0).toLocaleString('id-ID')}</p>
           </div>
           <button onClick={() => handleUndo(lastTxToast.id)} className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-black text-[11px] rounded-xl cursor-pointer shadow-sm flex items-center gap-1"><X size={12}/> Batalkan</button>
         </div>
@@ -1158,10 +1168,10 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                               const cGas = ent.gasCustomPrices?.[gpName];
                               const p = getEffectivePrice(cGas, gasMasterConfig[gpName] || 0);
                               const isCust = cGas !== undefined && cGas !== null && cGas !== '';
-                              return <option key={gpName} value={gpName}>{gpName} - Rp {(p || 0).toLocaleString('id-ID')} {isCust ? '(Khusus)' : ''}</option>
+                              return <option key={gpName} value={gpName}>{gpName} - Rp {((p) || 0).toLocaleString('id-ID')} {isCust ? '(Khusus)' : ''}</option>
                             })}
                           </select>
-                          <span className="text-[10px] text-orange-700 font-bold px-1">Harga: Rp {(displayItemPrice || 0).toLocaleString('id-ID')} {hasCustomGas ? (displayItemPrice===0 ? '(FOC)' : '(Khusus)') : '(Master)'}</span>
+                          <span className="text-[10px] text-orange-700 font-bold px-1">Harga: Rp {((displayItemPrice) || 0).toLocaleString('id-ID')} {hasCustomGas ? (displayItemPrice===0 ? '(FOC)' : '(Khusus)') : '(Master)'}</span>
                         </div>
                         {!isReadOnly && <div className="flex items-center gap-1 shrink-0 self-end sm:self-auto">{getAddButtons(ent)}</div>}
                       </div>
@@ -1183,7 +1193,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${isActiveToday ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}>(Total: {count})</span>
                       </div>
                       {ent.companyName && <p className="text-[10px] text-slate-500 truncate mt-0.5">PT: {ent.companyName}</p>}
-                      <p className="text-[10px] text-emerald-700 font-bold mt-0.5">Rp {(displayItemPrice || 0).toLocaleString('id-ID')} {displayItemPrice === 0 ? '(FOC)' : (hasCustomPrice ? '(Khusus)' : '(Master)')}</p>
+                      <p className="text-[10px] text-emerald-700 font-bold mt-0.5">Rp {((displayItemPrice) || 0).toLocaleString('id-ID')} {displayItemPrice === 0 ? '(FOC)' : (hasCustomPrice ? '(Khusus)' : '(Master)')}</p>
                     </div>
                     {!isReadOnly && <div className="flex items-center gap-1 shrink-0">{getAddButtons(ent)}</div>}
                   </div>
@@ -1215,7 +1225,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                   </div>
                   <div className="text-right flex items-center gap-2">
                     <div>
-                      <p className={`font-black ${textClass}`}>Rp {(tx.totalAmount||0).toLocaleString('id-ID')}</p>
+                      <p className={`font-black ${textClass}`}>Rp {((tx.totalAmount)||0).toLocaleString('id-ID')}</p>
                       <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${tx.status==='VOIDED'?'bg-red-100 text-red-700':'bg-emerald-100 text-emerald-800'}`}>{tx.status==='VOIDED'?'DIBATALKAN':'SELESAI'}</span>
                     </div>
                     {(canVoidAny || (tx.operatorName === user.name && tx.dateStr === todayStr)) && tx.status !== 'VOIDED' && !isReadOnly && (
@@ -1309,7 +1319,7 @@ const ReportsModule = ({ user, onNavigateHome }) => {
 
   useEffect(() => {
     let unsubs = [];
-    if (!isValidFirebaseConfig) return;
+    if (!isValidFirebaseConfig || !db) return;
 
     try {
       unsubs.push(onSnapshot(getDocPath('settings', 'tandon_config'), snap => { if(snap.exists()) setMasterPrices(p=>({...p, TANDON: snap.data().price??20000})); }, e=>console.warn(e)));
@@ -1416,8 +1426,8 @@ const ReportsModule = ({ user, onNavigateHome }) => {
   const maxMo = Math.max(...monthData.map(m => m.omset), 10000);
 
   const handleWhatsAppShare = () => {
-    const text = `*📊 LAPORAN POS*\n💰 Total Omset: Rp ${(totalOmset || 0).toLocaleString('id-ID')}${totalFocVol > 0 ? ` (FOC: ${totalFocVol} unit)` : ''}\n\n` +
-      divRevenues.map(d => `- ${d.name}: Vol ${d.vol}${d.foc > 0 ? ` (FOC ${d.foc})` : ''} | Rp ${(d.rev || 0).toLocaleString('id-ID')}`).join('\n');
+    const text = `*📊 LAPORAN POS*\n💰 Total Omset: Rp ${((totalOmset) || 0).toLocaleString('id-ID')}${totalFocVol > 0 ? ` (FOC: ${totalFocVol} unit)` : ''}\n\n` +
+      divRevenues.map(d => `- ${d.name}: Vol ${d.vol}${d.foc > 0 ? ` (FOC ${d.foc})` : ''} | Rp ${((d.rev) || 0).toLocaleString('id-ID')}`).join('\n');
     if (typeof window !== 'undefined') {
       window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
     }
@@ -1515,10 +1525,10 @@ const ReportsModule = ({ user, onNavigateHome }) => {
             <span className="text-[10px] font-bold text-emerald-200 uppercase tracking-wider block">TOTAL OMSET GABUNGAN (NON-FOC)</span>
             <div className="text-right">
               {totalFocVol > 0 && <span className="text-[10px] font-extrabold bg-orange-500 text-white px-2 py-0.5 rounded shadow-xs block mb-1">Total Volume FOC: {totalFocVol}</span>}
-              {totalFocValuation > 0 && <span className="text-[9px] font-bold text-orange-200 bg-black/20 px-1.5 py-0.5 rounded">Valuasi FOC: Rp {(totalFocValuation || 0).toLocaleString('id-ID')}</span>}
+              {totalFocValuation > 0 && <span className="text-[9px] font-bold text-orange-200 bg-black/20 px-1.5 py-0.5 rounded">Valuasi FOC: Rp {((totalFocValuation) || 0).toLocaleString('id-ID')}</span>}
             </div>
           </div>
-          <div className="text-3xl font-black relative z-10">Rp {(totalOmset || 0).toLocaleString('id-ID')}</div>
+          <div className="text-3xl font-black relative z-10">Rp {((totalOmset) || 0).toLocaleString('id-ID')}</div>
         </div>
 
         <div className="pt-2">
@@ -1574,7 +1584,7 @@ const ReportsModule = ({ user, onNavigateHome }) => {
                      const hp = maxMo > 0 ? Math.max(Math.round((m.omset/maxMo)*100),6) : 6;
                      const isSel = m.ds === selectedTrendDate;
                      return (
-                       <div key={m.day} onClick={()=>setSelectedTrendDate(prev => prev === m.ds ? null : m.ds)} className="flex flex-col items-center gap-1 h-full justify-end w-6 group cursor-pointer" title={`${m.ds}: Rp ${(m.omset || 0).toLocaleString()}`}>
+                       <div key={m.day} onClick={()=>setSelectedTrendDate(prev => prev === m.ds ? null : m.ds)} className="flex flex-col items-center gap-1 h-full justify-end w-6 group cursor-pointer" title={`${m.ds}: Rp ${((m.omset) || 0).toLocaleString('id-ID')}`}>
                          <div className={`w-4 rounded-t transition-colors ${isSel ? 'bg-emerald-600 shadow-md' : 'bg-emerald-400 group-hover:bg-emerald-600'}`} style={{height:`${hp}%`}}></div>
                          <span className={`text-[9px] font-bold ${isSel ? 'text-emerald-700 font-black' : 'text-slate-600'}`}>{m.day}</span>
                        </div>
@@ -1657,7 +1667,7 @@ const AdminPanel = ({ onNavigateHome }) => {
 
   useEffect(() => {
     let unsubs = [];
-    if (!isValidFirebaseConfig) return;
+    if (!isValidFirebaseConfig || !db) return;
 
     try {
       unsubs.push(onSnapshot(getDocPath('settings', 'tandon_config'), snap => { if(snap.exists()) setPrices(p=>({...p, TANDON: snap.data().price??20000})); }, (err)=>{ console.warn(err); }));
@@ -1675,7 +1685,7 @@ const AdminPanel = ({ onNavigateHome }) => {
     const initialLocal = getLocalData(conf.key, []);
     setCustData(Array.isArray(initialLocal) ? initialLocal.map(c => ({...c, price: (c.price === '' || c.price === null || c.price === undefined) ? null : c.price})) : []);
 
-    if (!isValidFirebaseConfig) return;
+    if (!isValidFirebaseConfig || !db) return;
 
     const unsub = onSnapshot(getPublicPath(conf.key), snap => {
       const l = snap.docs.map(d=>({id:d.id,...d.data()}));
@@ -1692,7 +1702,7 @@ const AdminPanel = ({ onNavigateHome }) => {
     if (!canManageCredentials) return;
     const v = val === '' ? 0 : parseInt(val);
     setPrices(p => ({...p, [key]: isNaN(v) ? 0 : v}));
-    if (isValidFirebaseConfig) {
+    if (isValidFirebaseConfig && db) {
       try { await setDoc(getDocPath('settings', confKey), { price: isNaN(v) ? 0 : v, updatedBy: sessionUser.name, updatedAt: Date.now() }, { merge: true }); } catch(e){ console.warn(e); }
     }
   };
@@ -1702,7 +1712,7 @@ const AdminPanel = ({ onNavigateHome }) => {
     const v = val === '' ? 0 : parseInt(val);
     const updatedProducts = { ...gasProducts, [prodName]: isNaN(v) ? 0 : v };
     setGasProducts(updatedProducts);
-    if (isValidFirebaseConfig) {
+    if (isValidFirebaseConfig && db) {
       try { await setDoc(getDocPath('settings', 'gas_config'), { products: updatedProducts, updatedBy: sessionUser.name, updatedAt: Date.now() }, { merge: true }); } catch(e){ console.warn(e); }
     }
   };
@@ -1787,7 +1797,7 @@ const AdminPanel = ({ onNavigateHome }) => {
     const updatedList = editingCust ? safeCustData.map(c => c.id === editingCust.id ? { ...c, ...payload } : c) : [...safeCustData, payload];
     setCustData(updatedList); setLocalData(conf.key, updatedList); setIsCustModalOpen(false);
 
-    if (isValidFirebaseConfig) {
+    if (isValidFirebaseConfig && db) {
       try {
           if (editingCust) await updateDoc(getDocPath(conf.key, editingCust.id), payload);
           else await setDoc(getDocPath(conf.key, payload.id), payload);
@@ -1817,7 +1827,7 @@ const AdminPanel = ({ onNavigateHome }) => {
     setAllUsers(updated); setLocalData('all_users', updated); setIsAddUserOpen(false); setEditingUser(null);
     setNewUserName(''); setNewUserUser(''); setSuggestedPwd(''); setNewUserRole('OPERATOR'); setNewUserDivs(['TANDON']); setUserAddError('');
     
-    if (isValidFirebaseConfig) {
+    if (isValidFirebaseConfig && db) {
       try { 
         if (editingUser) await updateDoc(getDocPath('users', userId), newUserObj);
         else await setDoc(getDocPath('users', userId), newUserObj); 
@@ -1848,7 +1858,7 @@ const AdminPanel = ({ onNavigateHome }) => {
 
     const updated = custData.map(c => c.id === cust.id ? { ...c, portalAccessEnabled: newStatus } : c);
     setCustData(updated); setLocalData(conf.key, updated);
-    if (isValidFirebaseConfig) {
+    if (isValidFirebaseConfig && db) {
       try { await updateDoc(getDocPath(conf.key, cust.id), { portalAccessEnabled: newStatus }); } catch(e) { console.warn(e); }
     }
   };
@@ -1872,7 +1882,7 @@ const AdminPanel = ({ onNavigateHome }) => {
     setCustData(updated); setLocalData(confKey, updated);
     setCredentialPromptTarget(null);
 
-    if (isValidFirebaseConfig) {
+    if (isValidFirebaseConfig && db) {
       try {
         await updateDoc(getDocPath(confKey, cust.id), payload);
       } catch(err) { console.warn(err); }
@@ -1894,7 +1904,7 @@ const AdminPanel = ({ onNavigateHome }) => {
         const updated = allUsers.map(u => u.id === resetTarget.data.id ? { ...u, password: finalPwd } : u);
         setAllUsers(updated); setLocalData('all_users', updated);
         
-        if (isValidFirebaseConfig) {
+        if (isValidFirebaseConfig && db) {
           updateDoc(getDocPath('users', resetTarget.data.id), { password: finalPwd }).catch(err=>console.warn(err));
         }
       } else {
@@ -1904,7 +1914,7 @@ const AdminPanel = ({ onNavigateHome }) => {
         const updated = custData.map(c => c.id === resetTarget.data.id ? { ...c, password: finalPwd } : c);
         setCustData(updated); setLocalData(confKey, updated);
         
-        if (isValidFirebaseConfig) {
+        if (isValidFirebaseConfig && db) {
           updateDoc(getDocPath(confKey, resetTarget.data.id), { password: finalPwd }).catch(err=>console.warn(err));
         }
       }
@@ -2020,7 +2030,7 @@ const AdminPanel = ({ onNavigateHome }) => {
                   const rawP = c.price;
                   const hasCustP = rawP !== undefined && rawP !== null && rawP !== '' && String(rawP).trim() !== '';
                   const numericP = Number(rawP);
-                  displayPriceText = hasCustP ? `Rp ${(numericP || 0).toLocaleString('id-ID')} ${numericP === 0 ? '(FOC)' : '(Khusus)'}` : `Rp ${(activeMasterPrice || 0).toLocaleString('id-ID')} (Master)`;
+                  displayPriceText = hasCustP ? `Rp ${((numericP) || 0).toLocaleString('id-ID')} ${numericP === 0 ? '(FOC)' : '(Khusus)'}` : `Rp ${((activeMasterPrice) || 0).toLocaleString('id-ID')} (Master)`;
                 }
 
                 return (
@@ -2194,7 +2204,7 @@ const AdminPanel = ({ onNavigateHome }) => {
                 {Object.keys(gasProducts).map(prod => (
                   <div key={prod} className="flex flex-col bg-emerald-50/50 p-1.5 rounded-lg border border-emerald-100">
                     <span className="text-[9px] font-bold text-emerald-900 truncate mb-1">{prod}</span>
-                    <input type="number" value={custForm.gasCustomPrices[prod] !== undefined ? custForm.gasCustomPrices[prod] : ''} onChange={e => setCustForm({...custForm, gasCustomPrices: {...custForm.gasCustomPrices, [prod]: e.target.value}})} onWheel={(e) => e.target.blur()} placeholder={(gasProducts[prod] || 0).toLocaleString('id-ID')} className="w-full p-1.5 bg-white border border-emerald-200 rounded text-xs font-black text-emerald-900 placeholder:text-emerald-300 placeholder:font-medium outline-none focus:ring-1 focus:ring-emerald-500" />
+                    <input type="number" value={custForm.gasCustomPrices[prod] !== undefined ? custForm.gasCustomPrices[prod] : ''} onChange={e => setCustForm({...custForm, gasCustomPrices: {...custForm.gasCustomPrices, [prod]: e.target.value}})} onWheel={(e) => e.target.blur()} placeholder={((gasProducts[prod]) || 0).toLocaleString('id-ID')} className="w-full p-1.5 bg-white border border-emerald-200 rounded text-xs font-black text-emerald-900 placeholder:text-emerald-300 placeholder:font-medium outline-none focus:ring-1 focus:ring-emerald-500" />
                   </div>
                 ))}
               </div>
@@ -2371,7 +2381,7 @@ export default function App() {
     <ErrorBoundary>
       <AuthProvider>
         <MainApp />
-        <Analytics />
+         <Analytics />
       </AuthProvider>
     </ErrorBoundary>
   );
