@@ -1,7 +1,8 @@
 import React, { useState, useEffect, createContext, useContext, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, onSnapshot, collection, updateDoc } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, onSnapshot, collection, updateDoc, query, where } from 'firebase/firestore';
+import { getAnalytics, isSupported } from 'firebase/analytics';
 import { 
   Users, Settings, Plus, X, LogOut, Droplet, Package, 
   Flame, ChevronRight, ArrowLeft, Truck,
@@ -27,14 +28,27 @@ const firebaseConfig = {
   appId: "1:330404051844:web:77e11003081143ff893bd1",
   measurementId: "G-TSSC1J1S0D"
 };
-
-const app = initializeApp(firebaseConfig);
+const app = initializeApp(vercelFirebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof window !== 'undefined' && window.__app_id ? window.__app_id : 'default-kalimas-app';
 
-const getPublicPath = (collectionName) => collection(db, 'artifacts', appId, 'public', 'data', collectionName);
-const getDocPath = (collectionName, docId) => doc(db, 'artifacts', appId, 'public', 'data', collectionName, docId);
+let analytics = null;
+if (typeof window !== 'undefined' && isValidFirebaseConfig) {
+  try {
+    isSupported().then((supported) => {
+      if (supported) {
+        try {
+          analytics = getAnalytics(app);
+        } catch (e) {
+          console.warn("Firebase Analytics init error:", e);
+        }
+      }
+    }).catch((err) => console.warn("Firebase Analytics error:", err));
+  } catch (e) {
+    console.warn("Firebase Analytics check error:", e);
+  }
+}
 
 // ==========================================
 // 3. UTILITY FUNCTIONS & CONSTANTS
@@ -225,7 +239,7 @@ const Modal = ({ isOpen, onClose, title, children }) => {
 };
 
 // ==========================================
-// 5. CONTEXT & AUTH
+// 5. CONTEXT & AUTH (GLOBAL HYDRATION)
 // ==========================================
 const AuthContext = createContext();
 
@@ -237,11 +251,13 @@ const AuthProvider = ({ children }) => {
     const users = getLocalData('all_users', []);
     return localInit || users.length > 0;
   });
+  const [globalTransactions, setGlobalTransactions] = useState(() => getLocalData('transactions', []));
 
   useEffect(() => {
     let unsub = null;
     const initAuth = async () => {
-      try { await signInAnonymously(auth); } catch (err) { console.warn(err); }
+      if (!isValidFirebaseConfig) return;
+      try { await signInAnonymously(auth); } catch (err) { console.warn("Firebase Auth warning:", err); }
     };
     initAuth();
 
@@ -280,12 +296,15 @@ const AuthProvider = ({ children }) => {
             }
           }, (err) => { console.warn(err); });
         } catch (e) { console.warn(e); }
-      } else {
-        try { await signInAnonymously(auth); } catch (err) { console.warn(err); }
+      } else if (isValidFirebaseConfig) {
+        try { await signInAnonymously(auth); } catch (err) { console.warn("Firebase Auth warning:", err); }
       }
     });
 
-    const handleFocus = () => { try { auth.currentUser || signInAnonymously(auth); } catch (e) { console.warn(e); } };
+    const handleFocus = () => { 
+      if (!isValidFirebaseConfig) return;
+      try { auth.currentUser || signInAnonymously(auth); } catch (e) { console.warn(e); } 
+    };
     window.addEventListener('focus', handleFocus);
 
     return () => { 
@@ -294,6 +313,40 @@ const AuthProvider = ({ children }) => {
       window.removeEventListener('focus', handleFocus);
     };
   }, [sessionUser]);
+
+  // CHG-017: Global Transaction Listener (Resolves Firebase Read Limits)
+  useEffect(() => {
+    if (!sessionUser) {
+      setGlobalTransactions([]);
+      return;
+    }
+    
+    let txUnsub = null;
+    try {
+      const isInternal = !['DRIVER', 'CUSTOMER_TANGKI', 'CUSTOMER_GALLON', 'CUSTOMER_KAPAL', 'CUSTOMER_GAS'].includes(sessionUser.role);
+
+      if (isInternal) {
+        // Staff downloads all transactions EXACTLY ONCE per session
+        txUnsub = onSnapshot(getPublicPath('transactions'), snap => {
+          const l = snap.docs.map(d=>({id:d.id,...d.data()}));
+          setGlobalTransactions(l);
+          setLocalData('transactions', l);
+        }, err => console.warn(err));
+      } else {
+        // Portal Customers only query their own specific records
+        const q = query(getPublicPath('transactions'), where("entityId", "==", sessionUser.id));
+        txUnsub = onSnapshot(q, snap => {
+          const l = snap.docs.map(d=>({id:d.id,...d.data()}));
+          setGlobalTransactions(l);
+          setLocalData('cust_tx_' + sessionUser.id, l);
+        }, err => console.warn(err));
+      }
+    } catch(e) { console.warn(e); }
+
+    return () => {
+      if (txUnsub) txUnsub();
+    };
+  }, [sessionUser?.id, sessionUser?.role]);
 
   const login = (username, password) => {
     const cleanUsername = username.trim().toLowerCase();
@@ -350,15 +403,18 @@ const AuthProvider = ({ children }) => {
     return { success: false, message: 'Username atau password salah / non-aktif.' };
   };
 
-  const logout = () => { setSessionUser(null); setLocalData('session_user', null); };
+  const logout = () => { 
+    setSessionUser(null); 
+    setLocalData('session_user', null); 
+    setGlobalTransactions([]); // CHG-017 memory flush
+  };
 
-  return <AuthContext.Provider value={{ sessionUser, allUsers, setAllUsers, systemInitialized, setSystemInitialized, login, logout }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ sessionUser, allUsers, setAllUsers, systemInitialized, setSystemInitialized, login, logout, globalTransactions, setGlobalTransactions }}>{children}</AuthContext.Provider>;
 };
 
 // ==========================================
 // 6. MODULES & VIEWS
 // ==========================================
-
 const SystemInitScreen = () => {
   const { setAllUsers, setSystemInitialized } = useContext(AuthContext);
   const [name, setName] = useState(''); const [user, setUser] = useState(''); const [pwd, setPwd] = useState('');
@@ -429,7 +485,7 @@ const LoginScreen = () => {
   );
 };
 
-const CustomerPortal = ({ user, logout }) => {
+const CustomerPortal = ({ user, logout, isOnline = true }) => {
   const getTheme = (role) => {
     switch(role) {
       case 'DRIVER': return { label: 'Tandon', bg: 'bg-blue-600', txt: 'text-blue-700', light: 'bg-blue-50', border: 'border-blue-200' };
@@ -442,7 +498,9 @@ const CustomerPortal = ({ user, logout }) => {
   };
 
   const theme = getTheme(user.role);
-  const [allTx, setAllTx] = useState(() => getLocalData('transactions', []));
+  const { globalTransactions } = useContext(AuthContext); // CHG-017 consumes global context
+  const allTx = globalTransactions || [];
+  
   const [selectedDate, setSelectedDate] = useState(() => getMakassarDateString());
   const [selectedGraphDate, setSelectedGraphDate] = useState(() => getMakassarDateString());
   const [zoomedDate, setZoomedDate] = useState(null);
@@ -451,19 +509,8 @@ const CustomerPortal = ({ user, logout }) => {
     if (selectedDate) setSelectedGraphDate(selectedDate); 
   }, [selectedDate]);
 
-  useEffect(() => {
-    let unsub;
-    try {
-      unsub = onSnapshot(getPublicPath('transactions'), snap => { 
-        const l = snap.docs.map(d=>({id:d.id,...d.data()})); 
-        if(Array.isArray(l)) { setAllTx(l); setLocalData('transactions', l); } 
-      }, (err)=>{ console.warn(err); });
-    } catch(e){ console.warn(e); }
-    return () => { if(unsub) unsub(); };
-  }, []);
-
   const safeDateStr = selectedDate || getMakassarDateString();
-  const myTx = (Array.isArray(allTx) ? allTx : []).filter(t => t.entityId === user.id && t.status !== 'VOIDED');
+  const myTx = (Array.isArray(allTx) ? allTx : []).filter(t => t.status !== 'VOIDED'); // Already bounded by global query
   
   const dateParts = useMemo(() => {
     try {
@@ -532,7 +579,17 @@ const CustomerPortal = ({ user, logout }) => {
           <span className="text-[10px] font-bold text-white/80 uppercase tracking-widest">Portal Pelanggan</span>
           <h1 className="font-black text-lg flex items-center gap-2">{user.name}</h1>
         </div>
-        <button onClick={logout} className="p-2 bg-black/20 hover:bg-black/30 rounded-xl transition-all cursor-pointer"><LogOut size={18}/></button>
+        <div className="flex items-center gap-2">
+          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border transition-all ${
+            isOnline 
+              ? 'bg-white/20 text-white border-white/30' 
+              : 'bg-amber-400 text-slate-900 border-amber-200 animate-pulse'
+          }`}>
+            <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-300' : 'bg-amber-900'}`}></span>
+            <span>{isOnline ? 'Online' : 'Offline'}</span>
+          </div>
+          <button onClick={logout} className="p-2 bg-black/20 hover:bg-black/30 rounded-xl transition-all cursor-pointer"><LogOut size={18}/></button>
+        </div>
       </header>
 
       <main className="max-w-md sm:max-w-xl mx-auto p-4 space-y-4 pb-20">
@@ -614,6 +671,9 @@ const CustomerPortal = ({ user, logout }) => {
   );
 };
 
+// ==========================================
+// 7. OPERATOR & SHARED UI ELEMENTS
+// ==========================================
 const DivisionHeader = ({ title, icon: Icon, price, priceLabel, colorClass, onNavigateHome }) => (
   <div className="flex items-center justify-between">
     <div className="flex items-center gap-2.5">
@@ -696,7 +756,7 @@ const PurchasePerformanceGraph = ({ txList = [], metric = 'VOLUME', subtitle = '
         </div>
       </div>
       
-      <div className="flex items-end justify-around gap-2 h-28 pt-4 pb-1 px-1 bg-slate-50 rounded-xl border border-slate-200 overflow-x-auto">
+      <div className="flex items-end justify-around gap-2 h-28 pt-4 pb-1 px-1 bg-slate-50 rounded-xl border border-slate-200 overflow-x-auto min-w-full">
         {chartData.length === 0 ? (
           <div className="text-xs text-slate-400 m-auto italic">Belum ada data transaksi.</div>
         ) : chartData.map((d, idx) => {
@@ -762,7 +822,10 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
       return { ...ent, price: isBlank ? undefined : p };
     });
   });
-  const [allTx, setAllTx] = useState(() => getLocalData('transactions', []));
+  
+  const { globalTransactions, setGlobalTransactions } = useContext(AuthContext); // CHG-017 Global hydration
+  const allTx = globalTransactions || [];
+
   const [search, setSearch] = useState('');
   
   const [globalPrice, setGlobalPrice] = useState(() => fallbackPrices[dbKeys.divType] || 20000); 
@@ -814,11 +877,6 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
           setEntities(normalized); 
           setLocalData(dbKeys.entity, normalized); 
         } 
-      }, (err)=>{ console.warn(err); }));
-      
-      unsubs.push(onSnapshot(getPublicPath('transactions'), snap => { 
-        const l = snap.docs.map(d=>({id:d.id,...d.data()})); 
-        if(Array.isArray(l)) { setAllTx(l); setLocalData('transactions', l); } 
       }, (err)=>{ console.warn(err); }));
     } catch(e){ console.warn(e); setGlobalPrice(defaultFp); }
     return () => unsubs.forEach(u => u && u());
@@ -897,7 +955,8 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     if (activeGasProd) txPayload.gasProduct = activeGasProd;
 
     const updatedTxList = [...allTx, { id: txId, ...txPayload }];
-    setAllTx(updatedTxList); setLocalData('transactions', updatedTxList);
+    setGlobalTransactions(updatedTxList); 
+    setLocalData('transactions', updatedTxList);
 
     setLastTxToast({ id: txId, name: entity.name || entity.shipName, qty, amount: unitPrice * qty });
     setTimeout(() => { setLastTxToast(prev => prev?.id === txId ? null : prev); }, 6000);
@@ -909,7 +968,8 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   const handleUndo = async (txId) => {
     if (isReadOnly) return;
     const updatedTxList = allTx.map(t => t.id === txId ? { ...t, status: 'VOIDED', voidedAt: Date.now(), voidedBy: user.name } : t);
-    setAllTx(updatedTxList); setLocalData('transactions', updatedTxList);
+    setGlobalTransactions(updatedTxList); 
+    setLocalData('transactions', updatedTxList);
     setLastTxToast(null);
     try { await updateDoc(getDocPath('transactions', txId), { status: 'VOIDED', voidedAt: Date.now(), voidedBy: user.name }); } catch(err){ console.warn(err); }
   };
@@ -953,33 +1013,37 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     const lastMyTxForEntity = activeTx.slice().reverse().find(t => t.entityId === entity.id && t.operatorName === user.name && t.dateStr === todayStr && t.status !== 'VOIDED');
     let btns;
     
-    if (dbKeys.divType === 'GAS_INDUSTRI') {
-      const isCustomizing = customQtyRow === entity.id;
-      if (isCustomizing) {
-        btns = (
-          <div className="flex items-center gap-1 animate-in fade-in slide-in-from-right-2">
-            <input 
-              type="number" min="1" autoFocus 
-              value={customQtyVal} onChange={e=>setCustomQtyVal(e.target.value)} onWheel={(e) => e.target.blur()}
-              className="w-14 p-1 text-xs font-bold border border-orange-300 rounded-lg text-center outline-none focus:ring-1 focus:ring-orange-500" placeholder="Jml" 
-            />
-            <button onClick={()=>{const q = parseInt(customQtyVal); if(q>0) handleAddTx(entity, q); setCustomQtyRow(null); setCustomQtyVal('');}} className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] rounded-lg cursor-pointer shadow-xs">✔</button>
-            <button onClick={()=>{setCustomQtyRow(null); setCustomQtyVal('');}} className="px-2 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-600 font-black text-[11px] rounded-lg cursor-pointer shadow-xs">✖</button>
-          </div>
-        );
-      } else {
-        btns = (
-          <div className="flex items-center gap-1">
-            {[1, 5, 10].map(v => <button key={v} onClick={()=>handleAddTx(entity, v)} className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] rounded-lg shadow-xs cursor-pointer">+{v}</button>)}
-            <button onClick={()=>setCustomQtyRow(entity.id)} className="px-2 py-1.5 bg-orange-600 hover:bg-orange-700 text-white font-black text-[11px] rounded-lg shadow-xs cursor-pointer">Kustom</button>
-          </div>
-        );
-      }
+    const isCustomizing = customQtyRow === entity.id;
+
+    if (isCustomizing) {
+      const inputRing = dbKeys.divType === 'GAS_INDUSTRI' ? 'border-orange-300 focus:ring-orange-500' : 'border-emerald-300 focus:ring-emerald-500';
+      btns = (
+        <div className="flex items-center gap-1 animate-in fade-in slide-in-from-right-2">
+          <input 
+            type="number" min="1" autoFocus 
+            value={customQtyVal} onChange={e=>setCustomQtyVal(e.target.value)} onWheel={(e) => e.target.blur()}
+            className={`w-14 p-1 text-xs font-bold border rounded-lg text-center outline-none focus:ring-1 ${inputRing}`} placeholder="Jml" 
+          />
+          <button onClick={()=>{const q = parseInt(customQtyVal); if(q>0) handleAddTx(entity, q); setCustomQtyRow(null); setCustomQtyVal('');}} className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] rounded-lg cursor-pointer shadow-xs">✔</button>
+          <button onClick={()=>{setCustomQtyRow(null); setCustomQtyVal('');}} className="px-2 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-600 font-black text-[11px] rounded-lg cursor-pointer shadow-xs">✖</button>
+        </div>
+      );
+    } else if (dbKeys.divType === 'GAS_INDUSTRI') {
+      btns = (
+        <div className="flex items-center gap-1">
+          {[1, 5, 10].map(v => <button key={v} onClick={()=>handleAddTx(entity, v)} className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] rounded-lg shadow-xs cursor-pointer">+{v}</button>)}
+          <button onClick={()=>setCustomQtyRow(entity.id)} className="px-2 py-1.5 bg-orange-600 hover:bg-orange-700 text-white font-black text-[11px] rounded-lg shadow-xs cursor-pointer">Kustom</button>
+        </div>
+      );
     } else {
       const qtys = dbKeys.divType === 'AIR_KAPAL' ? [10, 20, 50] : dbKeys.divType === 'GALLON' ? [1, 5, 10, 20] : [1];
+      const showCustom = dbKeys.divType === 'AIR_KAPAL' || dbKeys.divType === 'GALLON';
       btns = (
         <div className="flex items-center gap-1">
           {qtys.map(v => <button key={v} onClick={()=>handleAddTx(entity, v)} className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] rounded-lg shadow-xs cursor-pointer">+{v}</button>)}
+          {showCustom && (
+            <button onClick={()=>setCustomQtyRow(entity.id)} className="px-2 py-1.5 bg-slate-600 hover:bg-slate-700 text-white font-black text-[11px] rounded-lg shadow-xs cursor-pointer">Kustom</button>
+          )}
         </div>
       );
     }
@@ -1098,7 +1162,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
               })}
             </div>
           </Card>
-          <PurchasePerformanceGraph txList={todayActiveTx} />
+          <PurchasePerformanceGraph txList={todayActiveTx} metric="VOLUME" />
         </div>
       )}
 
@@ -1133,7 +1197,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
               ))}
             </div>
           </Card>
-          <PurchasePerformanceGraph txList={displayActiveTxList} />
+          <PurchasePerformanceGraph txList={displayActiveTxList} metric="VOLUME" />
         </div>
       )}
 
@@ -1198,32 +1262,26 @@ const ReportsModule = ({ user, onNavigateHome }) => {
     const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
   
-  // Custom Range States
   const [rangeStart, setRangeStart] = useState(() => getMakassarDateString());
   const [rangeEnd, setRangeEnd] = useState(() => getMakassarDateString());
   
   const [selectedDiv, setSelectedDiv] = useState(null);
   const [selectedTrendDate, setSelectedTrendDate] = useState(null);
-  const [allTx, setAllTx] = useState(() => getLocalData('transactions', []));
   
-  // Master Prices for FOC Valuation
+  const { globalTransactions } = useContext(AuthContext); // CHG-017 Global hydration
+  const allTx = globalTransactions || [];
+  
   const [masterPrices, setMasterPrices] = useState({ TANDON: 20000, GALLON: 6000, MOBIL_TANGKI: 350000, AIR_KAPAL: 50000 });
   const [gasMasterConfig, setGasMasterConfig] = useState({});
 
   useEffect(() => {
     let unsubs = [];
     try {
-      unsubs.push(onSnapshot(getPublicPath('transactions'), snap => { 
-        const l = snap.docs.map(d=>({id:d.id,...d.data()})); 
-        if(Array.isArray(l)) { setAllTx(l); setLocalData('transactions', l); } 
-      }, (err)=>{ console.warn(err); }));
-
       unsubs.push(onSnapshot(getDocPath('settings', 'tandon_config'), snap => { if(snap.exists()) setMasterPrices(p=>({...p, TANDON: snap.data().price??20000})); }, e=>console.warn(e)));
       unsubs.push(onSnapshot(getDocPath('settings', 'gallon_config'), snap => { if(snap.exists()) setMasterPrices(p=>({...p, GALLON: snap.data().price??6000})); }, e=>console.warn(e)));
       unsubs.push(onSnapshot(getDocPath('settings', 'tangki_config'), snap => { if(snap.exists()) setMasterPrices(p=>({...p, MOBIL_TANGKI: snap.data().price??350000})); }, e=>console.warn(e)));
       unsubs.push(onSnapshot(getDocPath('settings', 'kapal_config'), snap => { if(snap.exists()) setMasterPrices(p=>({...p, AIR_KAPAL: snap.data().price??50000})); }, e=>console.warn(e)));
       unsubs.push(onSnapshot(getDocPath('settings', 'gas_config'), snap => { if(snap.exists() && snap.data().products) { setGasMasterConfig(snap.data().products); } }, e=>console.warn(e)));
-
     } catch(e){ console.warn(e); }
     return () => unsubs.forEach(u => u && u());
   }, []);
@@ -1254,7 +1312,6 @@ const ReportsModule = ({ user, onNavigateHome }) => {
   const totalOmset = activeTx.filter(t => t.unitPrice !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
   const totalFocVol = activeTx.filter(t => t.unitPrice === 0).reduce((s, t) => s + (t.quantity || 1), 0);
 
-  // FOC Valuation Calculation
   const totalFocValuation = activeTx.filter(t => t.unitPrice === 0).reduce((sum, t) => {
     let standardPrice = 0;
     if (t.divisionType === 'GAS_INDUSTRI') {
@@ -1430,14 +1487,14 @@ const ReportsModule = ({ user, onNavigateHome }) => {
         <div className="pt-2">
           <div className="flex justify-between items-center mb-2">
             <h3 className="font-extrabold text-xs uppercase text-slate-700">Pendapatan Per Divisi <span className="text-[9px] text-slate-400 font-normal lowercase">(Klik grafik vertikal untuk detail)</span></h3>
-            {selectedDiv && <button onClick={()=>setSelectedDiv(null)} className="text-[9px] bg-slate-200 text-slate-600 px-2 py-1 rounded shadow-sm hover:bg-slate-300 transition-all font-bold cursor-pointer">Tutup Divisi</button>}
+            {selectedDiv && <button onClick={()=>{setSelectedDiv(null); setSelectedTrendDate(null);}} className="text-[9px] bg-slate-200 text-slate-600 px-2 py-1 rounded shadow-sm hover:bg-slate-300 transition-all font-bold cursor-pointer">Tutup Divisi</button>}
           </div>
           <div className="flex justify-around items-end h-48 pt-6 pb-2 px-2 bg-slate-50 rounded-xl border border-slate-200">
             {divRevenues.map(d => {
               const hp = maxDivRev > 0 ? Math.max(Math.round((d.rev/maxDivRev)*100), 5) : 5;
               const isSel = selectedDiv === d.key;
               return (
-                <div key={d.key} onClick={() => setSelectedDiv(isSel ? null : d.key)} className="flex flex-col items-center gap-2 h-full justify-end cursor-pointer group flex-1">
+                <div key={d.key} onClick={() => {setSelectedDiv(isSel ? null : d.key); setSelectedTrendDate(null);}} className="flex flex-col items-center gap-2 h-full justify-end cursor-pointer group flex-1">
                   <span className={`text-[9px] font-bold transition-all ${isSel ? d.txt : 'text-slate-500 opacity-0 group-hover:opacity-100'}`}>
                     {d.rev > 0 ? `${(d.rev/1000).toLocaleString('id-ID')}k` : '0'}
                   </span>
@@ -1771,22 +1828,33 @@ const AdminPanel = ({ onNavigateHome }) => {
     if (!canResetPassword || !resetTarget) return;
 
     try {
+      const finalPwd = resetPwd.trim();
+      if (!finalPwd) {
+          setResetMsg('Password tidak boleh kosong.');
+          return;
+      }
+
       if (resetTarget.type === 'USER') {
-        const updated = allUsers.map(u => u.id === resetTarget.data.id ? { ...u, password: resetPwd } : u);
+        const updated = allUsers.map(u => u.id === resetTarget.data.id ? { ...u, password: finalPwd } : u);
         setAllUsers(updated); setLocalData('all_users', updated);
-        await updateDoc(getDocPath('users', resetTarget.data.id), { password: resetPwd });
+        
+        // CHG-015 Fire and forget (Removes offline hanging promise)
+        updateDoc(getDocPath('users', resetTarget.data.id), { password: finalPwd }).catch(err=>console.warn(err));
       } else {
         const confKey = resetTarget.confKey;
         if (!confKey) throw new Error("Database reference missing");
         
-        const updated = custData.map(c => c.id === resetTarget.data.id ? { ...c, password: resetPwd } : c);
+        const updated = custData.map(c => c.id === resetTarget.data.id ? { ...c, password: finalPwd } : c);
         setCustData(updated); setLocalData(confKey, updated);
-        await updateDoc(getDocPath(confKey, resetTarget.data.id), { password: resetPwd });
+        
+        // CHG-015 Fire and forget (Removes offline hanging promise)
+        updateDoc(getDocPath(confKey, resetTarget.data.id), { password: finalPwd }).catch(err=>console.warn(err));
       }
+      
       setResetMsg('Password diubah!');
       setTimeout(() => { setResetTarget(null); setResetMsg(''); }, 1500);
     } catch (err) {
-      console.error(err);
+      console.warn(err);
       setResetMsg('Gagal mengubah.');
     }
   };
@@ -1915,8 +1983,8 @@ const AdminPanel = ({ onNavigateHome }) => {
                         <button onClick={()=>togglePortalAccess(c)} title={isEnabled ? "Nonaktifkan Portal" : "Aktifkan Portal"} className={`p-1.5 rounded-lg border text-xs font-bold cursor-pointer transition-colors ${isEnabled ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100' : 'bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-200'}`}>
                           {isEnabled ? <Ban size={15}/> : <Check size={15}/>}
                         </button>
-                        {canResetPassword && c.username && c.password && (
-                          <button onClick={()=>{setResetTarget({data: c, type: 'CUSTOMER', confKey: CUST_CONFIGS[activeCustTab].key}); setResetPwd(generateSecurePassword(c.username)); setResetMsg('');}} title="Reset Password" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Key size={15}/></button>
+                        {canResetPassword && (
+                          <button onClick={()=>{setResetTarget({data: c, type: 'CUSTOMER', confKey: CUST_CONFIGS[activeCustTab].key}); setResetPwd(''); setResetMsg('');}} title="Reset Password" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Key size={15}/></button>
                         )}
                       </div>
                     )}
@@ -2173,14 +2241,26 @@ const DivisionSelector = ({ user, onSelectDivision }) => {
 const MainApp = () => {
   const { sessionUser, logout, systemInitialized } = useContext(AuthContext);
   const [currentView, setCurrentView] = useState('HOME');
-  
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+
   useEffect(() => { setCurrentView('HOME'); }, [sessionUser?.id]);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   if (!systemInitialized) return <SystemInitScreen />;
   if (!sessionUser) return <LoginScreen />;
   
   if (['DRIVER', 'CUSTOMER_TANGKI', 'CUSTOMER_GALLON', 'CUSTOMER_KAPAL', 'CUSTOMER_GAS'].includes(sessionUser.role)) {
-    return <CustomerPortal user={sessionUser} logout={logout} />;
+    return <CustomerPortal user={sessionUser} logout={logout} isOnline={isOnline} />;
   }
 
   return (
@@ -2188,6 +2268,14 @@ const MainApp = () => {
       <header className="bg-white border-b border-slate-200 sticky top-0 z-40 px-3 sm:px-4 py-2.5 flex justify-between items-center shadow-xs">
         <GalanganKalimasLogo size="sm" />
         <div className="flex items-center gap-2.5 sm:gap-3">
+          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border transition-all ${
+            isOnline 
+              ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+              : 'bg-amber-50 text-amber-700 border-amber-200 animate-pulse'
+          }`}>
+            <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+            <span>{isOnline ? 'Online' : 'Modus Offline'}</span>
+          </div>
           <div className="text-right flex flex-col items-end justify-center">
             <span className="text-[10px] font-black uppercase text-slate-900 leading-tight">{sessionUser.name}</span>
             <span className="text-[8px] font-bold px-1.5 py-0.5 rounded text-emerald-800 bg-emerald-100 leading-none mt-0.5">{sessionUser.role}</span>
@@ -2214,7 +2302,7 @@ export default function App() {
     <ErrorBoundary>
       <AuthProvider>
         <MainApp />
-        <Analytics />
+         <Analytics />
       </AuthProvider>
     </ErrorBoundary>
   );
