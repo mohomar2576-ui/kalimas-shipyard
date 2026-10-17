@@ -2,7 +2,7 @@ import React, { useState, useEffect, createContext, useContext, useMemo } from '
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot, collection, updateDoc, query, where } from 'firebase/firestore';
-import { getAnalytics } from "firebase/analytics";
+import { getAnalytics, isSupported } from 'firebase/analytics';
 import { 
   Users, Settings, Plus, X, LogOut, Droplet, Package, 
   Flame, ChevronRight, ArrowLeft, Truck,
@@ -10,25 +10,8 @@ import {
   PieChart, Key, Ban, Check, Edit, Calendar, BarChart2
 } from 'lucide-react';
 
-
-// Safe Analytics fallback component to prevent esbuild compilation crashes in local preview environments
-const Analytics = () => {
-  useEffect(() => {
-    // If running in production on Vercel, dynamically load analytics script if available
-    if (typeof window !== 'undefined' && process.env.NODE_ENV === 'production') {
-      try {
-        import('@vercel/analytics/react').then(mod => {
-          if (mod && mod.Analytics) {
-            // Script dynamically injected in Vercel runtime
-          }
-        }).catch(() => {});
-      } catch (e) {
-        console.warn("Vercel analytics optional load skipped.");
-      }
-    }
-  }, []);
-  return null;
-};
+// CHG-016: Safe inline Analytics fallback for Vercel
+const Analytics = () => null;
 
 const firebaseConfig = {
   apiKey: "AIzaSyBqtmy9iYvfDj9tcLgVbIxAbGZNRewOlX4",
@@ -39,7 +22,6 @@ const firebaseConfig = {
   appId: "1:330404051844:web:77e11003081143ff893bd1",
   measurementId: "G-TSSC1J1S0D"
 };
-
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -47,7 +29,6 @@ const appId = typeof window !== 'undefined' && window.__app_id ? window.__app_id
 
 const getPublicPath = (collectionName) => collection(db, 'artifacts', appId, 'public', 'data', collectionName);
 const getDocPath = (collectionName, docId) => doc(db, 'artifacts', appId, 'public', 'data', collectionName, docId);
-
 
 const CUST_CONFIGS = {
   TANDON: { key: 'tandon_drivers', nameField: 'name', prefix: 'td', label: 'Sopir Tandon', priceKey: 'TANDON' },
@@ -81,7 +62,6 @@ const getAdjacentDateString = (dateStr = getMakassarDateString(), offset = 0) =>
     return getMakassarDateString(); 
   }
 };
-
 
 const getMakassarTimeString = (timestamp = Date.now()) => {
   try {
@@ -132,7 +112,6 @@ const getEffectivePrice = (customPrice, globalPrice) => {
   return isNaN(parsed) ? gp : parsed;
 };
 
-
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -164,9 +143,7 @@ class ErrorBoundary extends React.Component {
 const GalanganKalimasLogo = ({ size = 'md', variant = 'color', className = '' }) => {
   const sizes = { sm: { h: 'h-8', t1: 'text-sm', t2: 'text-[8px]' }, md: { h: 'h-12', t1: 'text-lg', t2: 'text-[10px]' }, lg: { h: 'h-16', t1: 'text-2xl', t2: 'text-xs' } };
   const s = sizes[size] || sizes.md;
-  
   const [fallbackLevel, setFallbackLevel] = useState(0);
-
   const getImgSrc = () => {
     switch(fallbackLevel) {
       case 0: return '/GK Logo Only.png';
@@ -176,21 +153,11 @@ const GalanganKalimasLogo = ({ size = 'md', variant = 'color', className = '' })
       default: return 'https://placehold.co/100x100/10b981/ffffff?text=GK';
     }
   };
-
-  const handleError = () => {
-    if (fallbackLevel < 4) {
-      setFallbackLevel(prev => prev + 1);
-    }
-  };
+  const handleError = () => { if (fallbackLevel < 4) setFallbackLevel(prev => prev + 1); };
 
   return (
     <div className={`flex items-center gap-2.5 select-none ${className}`}>
-      <img 
-        src={getImgSrc()} 
-        alt="Galangan Kalimas Logo" 
-        className={`${s.h} w-auto object-contain shrink-0 drop-shadow-sm`} 
-        onError={handleError}
-      />
+      <img src={getImgSrc()} alt="Galangan Kalimas Logo" className={`${s.h} w-auto object-contain shrink-0 drop-shadow-sm`} onError={handleError} />
       <div className="flex flex-col leading-none justify-center">
         <span className={`font-black tracking-wider uppercase font-sans ${s.t1} ${variant==='light'?'text-white':'text-slate-900'}`}>KALIMAS</span>
         <span className={`font-bold tracking-[0.22em] uppercase mt-0.5 ${s.t2} text-[#DE5D36]`}>SHIPYARD</span>
@@ -198,7 +165,6 @@ const GalanganKalimasLogo = ({ size = 'md', variant = 'color', className = '' })
     </div>
   );
 };
-
 
 const Button = ({ children, variant = 'primary', className = '', ...props }) => {
   const base = "px-4 py-2.5 rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer select-none shadow-sm";
@@ -234,13 +200,12 @@ const Modal = ({ isOpen, onClose, title, children }) => {
   );
 };
 
-
 const AuthContext = createContext();
 
 const AuthProvider = ({ children }) => {
   const [sessionUser, setSessionUser] = useState(() => getLocalData('session_user', null));
   const [allUsers, setAllUsers] = useState(() => getLocalData('all_users', []));
-  const [allTx, setAllTx] = useState(() => getLocalData('transactions', [])); // CHG-017: Global Transaction State
+  const [allTx, setAllTx] = useState(() => getLocalData('transactions', []));
   const [systemInitialized, setSystemInitialized] = useState(() => {
     const localInit = getLocalData('sys_init', false);
     const users = getLocalData('all_users', []);
@@ -268,24 +233,30 @@ const AuthProvider = ({ children }) => {
                 divisions: isSuperOrMgmt ? ['TANDON', 'GALLON', 'MOBIL_TANGKI', 'AIR_KAPAL', 'GAS_INDUSTRI'] : (data.divisions || ['TANDON'])
               };
             });
+            
             if (list.length > 0) {
               setAllUsers(list); 
               setLocalData('all_users', list);
               setSystemInitialized(true); 
               setLocalData('sys_init', true);
               
-              if (sessionUser && !['DRIVER', 'CUSTOMER_TANGKI', 'CUSTOMER_GALLON', 'CUSTOMER_KAPAL', 'CUSTOMER_GAS'].includes(sessionUser.role)) {
-                const updatedUser = list.find(u => u.id === sessionUser.id);
-                if (updatedUser) {
-                  const isSuperOrMgmt = ['SUPER_ADMIN', 'MANAGEMENT'].includes(updatedUser.role);
-                  const normalizedUpdatedUser = {
-                    ...updatedUser,
-                    divisions: isSuperOrMgmt ? ['TANDON', 'GALLON', 'MOBIL_TANGKI', 'AIR_KAPAL', 'GAS_INDUSTRI'] : (updatedUser.divisions || ['TANDON'])
-                  };
-                  setSessionUser(normalizedUpdatedUser);
-                  setLocalData('session_user', normalizedUpdatedUser);
+              setSessionUser(prevSessionUser => {
+                if (prevSessionUser && !['DRIVER', 'CUSTOMER_TANGKI', 'CUSTOMER_GALLON', 'CUSTOMER_KAPAL', 'CUSTOMER_GAS'].includes(prevSessionUser.role)) {
+                  const updatedUser = list.find(u => u.id === prevSessionUser.id);
+                  if (updatedUser) {
+                    const isSuperOrMgmt = ['SUPER_ADMIN', 'MANAGEMENT'].includes(updatedUser.role);
+                    const normalizedUpdatedUser = {
+                      ...updatedUser,
+                      divisions: isSuperOrMgmt ? ['TANDON', 'GALLON', 'MOBIL_TANGKI', 'AIR_KAPAL', 'GAS_INDUSTRI'] : (updatedUser.divisions || ['TANDON'])
+                    };
+                    if (JSON.stringify(prevSessionUser) !== JSON.stringify(normalizedUpdatedUser)) {
+                      setLocalData('session_user', normalizedUpdatedUser);
+                      return normalizedUpdatedUser;
+                    }
+                  }
                 }
-              }
+                return prevSessionUser;
+              });
             }
           }, (err) => { console.warn(err); });
         } catch (e) { console.warn(e); }
@@ -296,35 +267,42 @@ const AuthProvider = ({ children }) => {
 
     const handleFocus = () => { try { auth.currentUser || signInAnonymously(auth); } catch (e) { console.warn(e); } };
     window.addEventListener('focus', handleFocus);
+    return () => { authUnsub(); if (unsub) unsub(); window.removeEventListener('focus', handleFocus); };
+  }, []);
 
-    return () => { 
-      authUnsub(); 
-      if (unsub) unsub(); 
-      window.removeEventListener('focus', handleFocus);
-    };
-  }, [sessionUser]);
-
-  // CHG-017: Global Transaction Listener (Runs ONCE per session, prevents N+1 Read Spike)
+  // CHG-019: Global Hydration + Server Time Restraint + Client Division Pruning
   useEffect(() => {
     if (!sessionUser) return;
-    
-    // Determine if the user is a portal customer
     const isCustomer = ['DRIVER', 'CUSTOMER_TANGKI', 'CUSTOMER_GALLON', 'CUSTOMER_KAPAL', 'CUSTOMER_GAS'].includes(sessionUser.role);
+    const isOperator = sessionUser.role === 'OPERATOR';
+    const userDivsStr = JSON.stringify(sessionUser.divisions || []);
     
-    // Default: Pull all transactions. If customer: pull only their transactions using where() to save quota reads.
     let txQuery = getPublicPath('transactions');
+    
     if (isCustomer) {
       txQuery = query(getPublicPath('transactions'), where('entityId', '==', sessionUser.id));
+    } else if (isOperator) {
+      // CHG-019: Only pull the last 48 hours to save 99% Firebase reads.
+      const today = getMakassarDateString();
+      const yesterday = getAdjacentDateString(today, -1);
+      txQuery = query(getPublicPath('transactions'), where('dateStr', 'in', [today, yesterday]));
     }
 
     const unsubTx = onSnapshot(txQuery, snap => {
-      const l = snap.docs.map(d=>({id:d.id,...d.data()}));
+      let l = snap.docs.map(d=>({id:d.id,...d.data()}));
+      
+      // CHG-019: Immediately discard divisions the operator does not have access to
+      if (isOperator) {
+        const allowedDivs = JSON.parse(userDivsStr);
+        l = l.filter(t => allowedDivs.includes(t.divisionType));
+      }
+      
       setAllTx(l);
       setLocalData('transactions', l);
     }, (err) => console.warn(err));
 
     return () => unsubTx();
-  }, [sessionUser?.id, sessionUser?.role]);
+  }, [sessionUser?.id, sessionUser?.role, JSON.stringify(sessionUser?.divisions || [])]);
 
   const login = (username, password) => {
     const cleanUsername = username.trim().toLowerCase();
@@ -332,13 +310,8 @@ const AuthProvider = ({ children }) => {
     const user = usersList.find(u => u.username?.toLowerCase() === cleanUsername && u.password === password && u.isActive !== false);
     if (user) {
       const isSuperOrMgmt = ['SUPER_ADMIN', 'MANAGEMENT'].includes(user.role);
-      const normalizedUser = {
-        ...user,
-        divisions: isSuperOrMgmt ? ['TANDON', 'GALLON', 'MOBIL_TANGKI', 'AIR_KAPAL', 'GAS_INDUSTRI'] : (user.divisions || ['TANDON'])
-      };
-      setSessionUser(normalizedUser); 
-      setLocalData('session_user', normalizedUser); 
-      return { success: true };
+      const normalizedUser = { ...user, divisions: isSuperOrMgmt ? ['TANDON', 'GALLON', 'MOBIL_TANGKI', 'AIR_KAPAL', 'GAS_INDUSTRI'] : (user.divisions || ['TANDON']) };
+      setSessionUser(normalizedUser); setLocalData('session_user', normalizedUser); return { success: true };
     }
 
     const checkPortal = (listKey, divisionName, roleName, nameField) => {
@@ -353,30 +326,15 @@ const AuthProvider = ({ children }) => {
     };
 
     const drvCheck = checkPortal('tandon_drivers', 'TANDON', 'DRIVER', 'name');
-    if (drvCheck.found) {
-      if (!drvCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan oleh Administrator.' };
-      setSessionUser(drvCheck.user); setLocalData('session_user', drvCheck.user); return { success: true };
-    }
+    if (drvCheck.found) { if (!drvCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' }; setSessionUser(drvCheck.user); setLocalData('session_user', drvCheck.user); return { success: true }; }
     const tcCheck = checkPortal('tangki_customers', 'MOBIL_TANGKI', 'CUSTOMER_TANGKI', 'name');
-    if (tcCheck.found) {
-      if (!tcCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' };
-      setSessionUser(tcCheck.user); setLocalData('session_user', tcCheck.user); return { success: true };
-    }
+    if (tcCheck.found) { if (!tcCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' }; setSessionUser(tcCheck.user); setLocalData('session_user', tcCheck.user); return { success: true }; }
     const gcCheck = checkPortal('gallon_customers', 'GALLON', 'CUSTOMER_GALLON', 'name');
-    if (gcCheck.found) {
-      if (!gcCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' };
-      setSessionUser(gcCheck.user); setLocalData('session_user', gcCheck.user); return { success: true };
-    }
+    if (gcCheck.found) { if (!gcCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' }; setSessionUser(gcCheck.user); setLocalData('session_user', gcCheck.user); return { success: true }; }
     const shCheck = checkPortal('kapal_ships', 'AIR_KAPAL', 'CUSTOMER_KAPAL', 'shipName');
-    if (shCheck.found) {
-      if (!shCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' };
-      setSessionUser(shCheck.user); setLocalData('session_user', shCheck.user); return { success: true };
-    }
+    if (shCheck.found) { if (!shCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' }; setSessionUser(shCheck.user); setLocalData('session_user', shCheck.user); return { success: true }; }
     const gsCheck = checkPortal('gas_customers', 'GAS_INDUSTRI', 'CUSTOMER_GAS', 'name');
-    if (gsCheck.found) {
-      if (!gsCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' };
-      setSessionUser(gsCheck.user); setLocalData('session_user', gsCheck.user); return { success: true };
-    }
+    if (gsCheck.found) { if (!gsCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' }; setSessionUser(gsCheck.user); setLocalData('session_user', gsCheck.user); return { success: true }; }
 
     return { success: false, message: 'Username atau password salah / non-aktif.' };
   };
@@ -385,7 +343,6 @@ const AuthProvider = ({ children }) => {
 
   return <AuthContext.Provider value={{ sessionUser, allUsers, setAllUsers, systemInitialized, setSystemInitialized, login, logout, allTx, setAllTx }}>{children}</AuthContext.Provider>;
 };
-
 
 const SystemInitScreen = () => {
   const { setAllUsers, setSystemInitialized } = useContext(AuthContext);
@@ -402,16 +359,11 @@ const SystemInitScreen = () => {
     try { 
       await setDoc(getDocPath('users', admin.id), admin); 
       const defaultConfigs = [
-        { key: 'tandon_config', price: 20000 },
-        { key: 'gallon_config', price: 6000 },
-        { key: 'tangki_config', price: 350000 },
-        { key: 'kapal_config', price: 50000 },
-        { key: 'gas_config', products: {
-          'Oxygen, 6 m³': 150000, 'Acetylene': 550000, 'Argon, 6 m³': 550000, 'Nitrogen, 6 m³': 400000,
-          'CO₂, 25 kg': 550000, 'LPG, 50 kg': 1500000, 'LPG, 12 kg': 275000, 'Oxygen Medis, 2 m³': 100000, 'Oxygen Medis, 6 m³': 150000
-        }}
+        { key: 'tandon_config', price: 20000 }, { key: 'gallon_config', price: 6000 },
+        { key: 'tangki_config', price: 350000 }, { key: 'kapal_config', price: 50000 },
+        { key: 'gas_config', products: { 'Oxygen, 6 m³': 150000, 'Acetylene': 550000, 'Argon, 6 m³': 550000, 'Nitrogen, 6 m³': 400000, 'CO₂, 25 kg': 550000, 'LPG, 50 kg': 1500000, 'LPG, 12 kg': 275000, 'Oxygen Medis, 2 m³': 100000, 'Oxygen Medis, 6 m³': 150000 }}
       ];
-      await Promise.all(defaultConfigs.map(conf => setDoc(getDocPath('settings', conf.key), { ...conf, updatedBy: 'SYSTEM_INIT', updatedAt: Date.now() }).catch((err)=>{ console.warn(err); })));
+      await Promise.all(defaultConfigs.map(conf => setDoc(getDocPath('settings', conf.key), { ...conf, updatedBy: 'SYSTEM_INIT', updatedAt: Date.now() }).catch((err)=>console.warn(err))));
     } catch(err){ console.warn(err); }
   };
 
@@ -435,11 +387,7 @@ const LoginScreen = () => {
   const { login } = useContext(AuthContext);
   const [user, setUser] = useState(''); const [pwd, setPwd] = useState(''); const [err, setErr] = useState('');
 
-  const handleLogin = (e) => {
-    e.preventDefault();
-    const res = login(user, pwd);
-    if (!res.success) setErr(res.message);
-  };
+  const handleLogin = (e) => { e.preventDefault(); const res = login(user, pwd); if (!res.success) setErr(res.message); };
 
   return (
     <div className="min-h-screen bg-emerald-900 flex items-center justify-center p-4">
@@ -457,7 +405,6 @@ const LoginScreen = () => {
   );
 };
 
-
 const CustomerPortal = ({ user, logout }) => {
   const getTheme = (role) => {
     switch(role) {
@@ -474,13 +421,9 @@ const CustomerPortal = ({ user, logout }) => {
   const [selectedDate, setSelectedDate] = useState(() => getMakassarDateString());
   const [selectedGraphDate, setSelectedGraphDate] = useState(() => getMakassarDateString());
   const [zoomedDate, setZoomedDate] = useState(null);
-  
-  // CHG-017: Utilize globally hydrated transactions to eliminate mass reads on mount
-  const { allTx } = useContext(AuthContext); 
+  const { allTx } = useContext(AuthContext);
 
-  useEffect(() => { 
-    if (selectedDate) setSelectedGraphDate(selectedDate); 
-  }, [selectedDate]);
+  useEffect(() => { if (selectedDate) setSelectedGraphDate(selectedDate); }, [selectedDate]);
 
   const safeDateStr = selectedDate || getMakassarDateString();
   const myTx = (Array.isArray(allTx) ? allTx : []).filter(t => t.entityId === user.id && t.status !== 'VOIDED');
@@ -488,29 +431,15 @@ const CustomerPortal = ({ user, logout }) => {
   const dateParts = useMemo(() => {
     try {
       const parts = safeDateStr.split('-').map(Number);
-      if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
-        return parts;
-      }
+      if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) return parts;
     } catch(e){ console.warn(e); }
     return getMakassarDateString().split('-').map(Number);
   }, [safeDateStr]);
 
-  const currentDateObj = useMemo(() => {
-    return new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
-  }, [dateParts]);
-  
+  const currentDateObj = useMemo(() => new Date(dateParts[0], dateParts[1] - 1, dateParts[2]), [dateParts]);
   const dayOfWeek = currentDateObj.getDay() || 7;
-  const monday = useMemo(() => {
-    const d = new Date(currentDateObj);
-    d.setDate(currentDateObj.getDate() - dayOfWeek + 1);
-    return d;
-  }, [currentDateObj, dayOfWeek]);
-
-  const sunday = useMemo(() => {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + 6);
-    return d;
-  }, [monday]);
+  const monday = useMemo(() => { const d = new Date(currentDateObj); d.setDate(currentDateObj.getDate() - dayOfWeek + 1); return d; }, [currentDateObj, dayOfWeek]);
+  const sunday = useMemo(() => { const d = new Date(monday); d.setDate(monday.getDate() + 6); return d; }, [monday]);
   
   const formatD = (dObj) => `${dObj.getFullYear()}-${String(dObj.getMonth() + 1).padStart(2, '0')}-${String(dObj.getDate()).padStart(2, '0')}`;
   const startOfWeek = formatD(monday);
@@ -519,7 +448,7 @@ const CustomerPortal = ({ user, logout }) => {
 
   const dailyTx = myTx.filter(t => t.dateStr === safeDateStr);
   const weeklyTx = myTx.filter(t => t.dateStr >= startOfWeek && t.dateStr <= endOfWeek);
-  const monthlyTx = myTx.filter(t => t.dateStr.startsWith(monthPrefix));
+  const monthlyTx = myTx.filter(t => t.dateStr?.startsWith(monthPrefix));
   const selectedGraphTx = myTx.filter(t => t.dateStr === (selectedGraphDate || safeDateStr));
 
   const dailyVol = dailyTx.reduce((s, t) => s + (t.quantity || 1), 0);
@@ -565,15 +494,15 @@ const CustomerPortal = ({ user, logout }) => {
           <div className="grid grid-cols-3 gap-2">
              <div className={`p-2 rounded-xl text-center border shadow-sm ${theme.light} ${theme.border}`}>
                 <p className="text-[9px] text-slate-500 uppercase font-bold mb-1 truncate">Hari ({safeDateStr})</p>
-                <p className={`text-sm font-black ${theme.txt}`}>{dailyVol} <span className="text-[9px] font-medium">{theme.label}</span></p>
+                <p className={`text-sm font-black ${theme.txt}`}>{dailyVol || 0} <span className="text-[9px] font-medium">{theme.label}</span></p>
              </div>
              <div className={`p-2 rounded-xl text-center border shadow-sm ${theme.light} ${theme.border}`}>
                 <p className="text-[9px] text-slate-500 uppercase font-bold mb-1 truncate">Pekan ({startOfWeek.slice(5)} - {endOfWeek.slice(5)})</p>
-                <p className={`text-sm font-black ${theme.txt}`}>{weeklyVol} <span className="text-[9px] font-medium">{theme.label}</span></p>
+                <p className={`text-sm font-black ${theme.txt}`}>{weeklyVol || 0} <span className="text-[9px] font-medium">{theme.label}</span></p>
              </div>
              <div className={`p-2 rounded-xl text-center border shadow-sm ${theme.light} ${theme.border}`}>
                 <p className="text-[9px] text-slate-500 uppercase font-bold mb-1 truncate">Bulan ({monthPrefix})</p>
-                <p className={`text-sm font-black ${theme.txt}`}>{monthlyVol} <span className="text-[9px] font-medium">{theme.label}</span></p>
+                <p className={`text-sm font-black ${theme.txt}`}>{monthlyVol || 0} <span className="text-[9px] font-medium">{theme.label}</span></p>
              </div>
           </div>
         </Card>
@@ -599,9 +528,7 @@ const CustomerPortal = ({ user, logout }) => {
                     onPointerLeave={() => setZoomedDate(null)}
                     onPointerCancel={() => setZoomedDate(null)}
                   >
-                    {(isSel || isZoomed) && (
-                      <span className={`absolute -top-5 text-[10px] font-black z-30 ${theme.txt}`}>{m.vol}</span>
-                    )}
+                    {(isSel || isZoomed) && <span className={`absolute -top-5 text-[10px] font-black z-30 ${theme.txt}`}>{m.vol || 0}</span>}
                     <div className={`w-full rounded-t-sm transition-transform duration-200 origin-bottom ${isZoomed ? 'scale-[2.5] z-20 shadow-md' : (isSel ? 'scale-[1.3] z-10 opacity-100 shadow-sm' : 'opacity-40 group-hover:opacity-70')} ${theme.bg}`} style={{height:`${hp}%`}}></div>
                     {isZoomed && <span className="absolute -bottom-5 text-[9px] font-bold text-slate-700 bg-white px-1 shadow-sm rounded z-30">{m.day}</span>}
                   </div>
@@ -618,9 +545,9 @@ const CustomerPortal = ({ user, logout }) => {
             {selectedGraphTx.length === 0 ? <p className="text-xs text-slate-400 text-center py-6 italic">Tidak ada transaksi pada tanggal ini.</p> : selectedGraphTx.slice().reverse().map(tx => (
               <div key={tx.id} className={`p-3 rounded-xl border flex justify-between items-center transition-all ${theme.light} ${theme.border}`}>
                 <div>
-                  <p className={`font-black text-xs uppercase ${theme.txt}`}>{tx.dateStr} <span className="text-[10px] font-medium text-slate-500">({getMakassarTimeString(tx.timestamp)})</span></p>
+                  <p className={`font-black text-xs uppercase ${theme.txt}`}>{tx.dateStr || '-'} <span className="text-[10px] font-medium text-slate-500">({getMakassarTimeString(tx.timestamp)})</span></p>
                   {tx.gasProduct && <p className="text-[10px] font-bold text-orange-700">{tx.gasProduct}</p>}
-                  <p className="text-[10px] text-slate-600 mt-1">{tx.quantity} {theme.label} • Rp {(tx.unitPrice || 0).toLocaleString('id-ID')}/unit {tx.unitPrice === 0 && <span className="text-[9px] bg-orange-100 text-orange-700 px-1 py-0.5 rounded font-bold ml-1">FOC</span>}</p>
+                  <p className="text-[10px] text-slate-600 mt-1">{tx.quantity || 0} {theme.label} • Rp {(tx.unitPrice || 0).toLocaleString('id-ID')}/unit {(tx.unitPrice || 0) === 0 && <span className="text-[9px] bg-orange-100 text-orange-700 px-1 py-0.5 rounded font-bold ml-1">FOC</span>}</p>
                 </div>
                 <div className="text-right">
                   <p className="font-black text-slate-900">Rp {(tx.totalAmount||0).toLocaleString('id-ID')}</p>
@@ -634,7 +561,6 @@ const CustomerPortal = ({ user, logout }) => {
   );
 };
 
-
 const DivisionHeader = ({ title, icon: Icon, price, priceLabel, colorClass, onNavigateHome }) => (
   <div className="flex items-center justify-between">
     <div className="flex items-center gap-2.5">
@@ -644,7 +570,7 @@ const DivisionHeader = ({ title, icon: Icon, price, priceLabel, colorClass, onNa
         <h1 className="text-xl font-black flex items-center gap-1.5"><Icon size={20} className={colorClass} /> {title}</h1>
       </div>
     </div>
-    {price > 0 && <span className={`text-xs font-bold px-3 py-1 rounded-full border bg-slate-50 ${colorClass}`}>Rp {price.toLocaleString('id-ID')} {priceLabel}</span>}
+    {Number(price) > 0 && <span className={`text-xs font-bold px-3 py-1 rounded-full border bg-slate-50 ${colorClass}`}>Rp {Number(price || 0).toLocaleString('id-ID')} {priceLabel}</span>}
   </div>
 );
 
@@ -655,9 +581,9 @@ const DivisionSplitStatsCards = ({ todayVol, myTodayVol, todayRev, myTodayRev, t
         <span className="text-[10px] font-bold text-emerald-200 uppercase tracking-wider block">TOTAL VOLUME</span>
         {todayFocVol > 0 && <span className="text-[9px] font-extrabold bg-orange-500 text-white px-1.5 py-0.5 rounded shadow-xs">FOC: {todayFocVol}</span>}
       </div>
-      <div className="text-2xl font-black">{todayVol} <span className="text-xs font-normal">{unitLabel}</span></div>
+      <div className="text-2xl font-black">{todayVol || 0} <span className="text-xs font-normal">{unitLabel}</span></div>
       <div className="text-[11px] font-medium text-emerald-100 pt-1 border-t border-emerald-500/40 flex justify-between">
-        <span>Input Saya:</span><span className="font-bold">{myTodayVol} {unitLabel}</span>
+        <span>Input Saya:</span><span className="font-bold">{myTodayVol || 0} {unitLabel}</span>
       </div>
     </Card>
     <Card className="p-3.5 bg-emerald-600 text-white space-y-1 shadow-sm border-emerald-500">
@@ -670,7 +596,6 @@ const DivisionSplitStatsCards = ({ todayVol, myTodayVol, todayRev, myTodayRev, t
   </div>
 );
 
-
 const PurchasePerformanceGraph = ({ txList = [], metric = 'VOLUME', subtitle = '' }) => {
   const [viewMode, setViewMode] = useState('CUSTOMER');
   const [isViewAllOpen, setIsViewAllOpen] = useState(false);
@@ -682,7 +607,7 @@ const PurchasePerformanceGraph = ({ txList = [], metric = 'VOLUME', subtitle = '
       const key = viewMode === 'CUSTOMER' ? (t.entityName || 'UMUM') : (t.operatorName || 'SISTEM');
       if (!dataMap[key]) dataMap[key] = { count: 0, omset: 0 };
       dataMap[key].count += (t.quantity || 1);
-      if (t.unitPrice !== 0) dataMap[key].omset += (t.totalAmount || 0);
+      if ((t.unitPrice || 0) !== 0) dataMap[key].omset += (t.totalAmount || 0);
     });
     
     return Object.entries(dataMap)
@@ -691,7 +616,7 @@ const PurchasePerformanceGraph = ({ txList = [], metric = 'VOLUME', subtitle = '
   }, [txList, viewMode, metric]);
 
   const chartData = allSortedData.slice(0, 10);
-  const maxVal = chartData.length > 0 ? Math.max(...chartData.map(d => metric === 'OMSET' ? d.omset : d.count), 5) : 5;
+  const maxVal = chartData.length > 0 ? Math.max(...chartData.map(d => metric === 'OMSET' ? (d.omset||0) : (d.count||0)), 5) : 5;
 
   const formatDisplayValue = (val) => {
     if (metric === 'VOLUME') return val;
@@ -720,37 +645,32 @@ const PurchasePerformanceGraph = ({ txList = [], metric = 'VOLUME', subtitle = '
       
       <div className="flex items-end justify-around gap-2 h-28 pt-4 pb-1 px-1 bg-slate-50 rounded-xl border border-slate-200 overflow-x-auto">
         {chartData.length === 0 ? (
-          <div className="text-xs text-slate-400 m-auto italic">Belum ada data transaksi.</div>
+          <div className="text-xs text-slate-400 m-auto italic">Belum ada data.</div>
         ) : chartData.map((d, idx) => {
-          const dataValue = metric === 'OMSET' ? d.omset : d.count;
+          const dataValue = metric === 'OMSET' ? (d.omset||0) : (d.count||0);
           const heightPercent = maxVal > 0 ? Math.max(Math.round((dataValue / maxVal) * 100), 6) : 6;
           return (
             <div key={idx} className="flex flex-col items-center gap-1 h-full justify-end flex-1 min-w-[30px] group cursor-default">
               <span className="text-[9px] font-bold text-slate-500 opacity-0 group-hover:opacity-100 transition-all whitespace-nowrap">{formatDisplayValue(dataValue)}</span>
-              <div 
-                className={`w-full max-w-[36px] rounded-t transition-all ${dataValue > 0 ? 'bg-emerald-500 group-hover:bg-emerald-600 shadow-xs' : 'bg-slate-200'}`} 
-                style={{ height: `${heightPercent}%` }}
-              ></div>
+              <div className={`w-full max-w-[36px] rounded-t transition-all ${dataValue > 0 ? 'bg-emerald-500 group-hover:bg-emerald-600 shadow-xs' : 'bg-slate-200'}`} style={{ height: `${heightPercent}%` }}></div>
               <span className="text-[9px] font-bold text-slate-600 text-center leading-tight truncate w-full px-1" title={d.name}>
-                {d.name.length > 8 ? d.name.slice(0,8) + '..' : d.name}
+                {(d.name || '').length > 8 ? (d.name || '').slice(0,8) + '..' : (d.name || '')}
               </span>
             </div>
           );
         })}
       </div>
 
-      <Modal isOpen={isViewAllOpen} onClose={() => setIsViewAllOpen(false)} title={`Daftar Lengkap ${viewMode === 'CUSTOMER' ? 'Pelanggan' : 'Operator'}`}>
+      <Modal isOpen={isViewAllOpen} onClose={() => setIsViewAllOpen(false)} title={`Daftar ${viewMode === 'CUSTOMER' ? 'Pelanggan' : 'Operator'}`}>
         <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
-          {allSortedData.length === 0 ? (
-             <p className="text-xs text-slate-400 text-center py-6 italic">Belum ada data.</p>
-          ) : (
+          {allSortedData.length === 0 ? <p className="text-xs text-slate-400 text-center py-6 italic">Belum ada data.</p> : (
             allSortedData.map((d, idx) => (
               <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 border border-slate-100 rounded-xl hover:bg-slate-100 transition-colors">
                 <div className="flex items-center gap-3">
                   <span className="text-[10px] font-black text-slate-400 w-4 text-right">#{idx + 1}</span>
                   <div>
                     <p className="text-xs font-black uppercase text-slate-800">{d.name}</p>
-                    <p className="text-[10px] font-bold text-emerald-600">Total Volume: {d.count}</p>
+                    <p className="text-[10px] font-bold text-emerald-600">Total Vol: {d.count || 0}</p>
                   </div>
                 </div>
                 <div className="text-right">
@@ -766,15 +686,12 @@ const PurchasePerformanceGraph = ({ txList = [], metric = 'VOLUME', subtitle = '
   );
 };
 
-
 const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLabel = '', textClass, variantClass, buttonVariant, onNavigateHome }) => {
   const isReadOnly = user.role === 'MANAGEMENT';
   const canVoidAny = ['ADMIN', 'SUPER_ADMIN', 'SUPERVISOR'].includes(user.role);
   const canAddEntity = !isReadOnly && !(dbKeys.divType === 'GAS_INDUSTRI' && user.role === 'OPERATOR');
   
-  const fallbackPrices = useMemo(() => ({
-    TANDON: 20000, GALLON: 6000, MOBIL_TANGKI: 350000, AIR_KAPAL: 50000, GAS_INDUSTRI: 150000
-  }), []);
+  const fallbackPrices = useMemo(() => ({ TANDON: 20000, GALLON: 6000, MOBIL_TANGKI: 350000, AIR_KAPAL: 50000, GAS_INDUSTRI: 150000 }), []);
 
   const [activeTab, setActiveTab] = useState('INPUT'); 
   const [entities, setEntities] = useState(() => {
@@ -786,7 +703,6 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     });
   });
   
-  // CHG-017: Use Global Hydrated Transactions
   const { allTx, setAllTx } = useContext(AuthContext); 
   const [search, setSearch] = useState('');
   
@@ -820,11 +736,9 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
       unsubs.push(onSnapshot(getDocPath('settings', dbKeys.config), snap => { 
         if(snap.exists()) {
           const dat = snap.data();
-          if (dbKeys.divType === 'GAS_INDUSTRI' && dat.products) {
-            setGasMasterConfig(dat.products);
-          } else if (Number(dat.price) > 0) {
-            setGlobalPrice(Number(dat.price));
-          } else { setGlobalPrice(defaultFp); }
+          if (dbKeys.divType === 'GAS_INDUSTRI' && dat.products) setGasMasterConfig(dat.products);
+          else if (Number(dat.price) > 0) setGlobalPrice(Number(dat.price));
+          else setGlobalPrice(defaultFp);
         } else { setGlobalPrice(defaultFp); }
       }, (err)=>{ console.warn(err); setGlobalPrice(defaultFp); }));
       
@@ -840,20 +754,20 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
           setLocalData(dbKeys.entity, normalized); 
         } 
       }, (err)=>{ console.warn(err); }));
-      
     } catch(e){ console.warn(e); setGlobalPrice(defaultFp); }
     return () => unsubs.forEach(u => u && u());
   }, [dbKeys.entity, dbKeys.config, dbKeys.divType, fallbackPrices]);
 
-  const activeTx = allTx.filter(t => t.divisionType === dbKeys.divType);
+  const safeAllTx = Array.isArray(allTx) ? allTx : [];
+  const activeTx = safeAllTx.filter(t => t.divisionType === dbKeys.divType);
   const todayActiveTx = activeTx.filter(t => t.dateStr === todayStr && t.status !== 'VOIDED');
   const myTodayTx = todayActiveTx.filter(t => t.operatorName === user.name);
   
   const todayVol = todayActiveTx.reduce((s, t) => s + (t.quantity || 1), 0);
   const myTodayVol = myTodayTx.reduce((s, t) => s + (t.quantity || 1), 0);
-  const todayRev = todayActiveTx.filter(t => t.unitPrice !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
-  const myTodayRev = myTodayTx.filter(t => t.unitPrice !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
-  const todayFocVol = todayActiveTx.filter(t => t.unitPrice === 0).reduce((s, t) => s + (t.quantity || 1), 0);
+  const todayRev = todayActiveTx.filter(t => (t.unitPrice||0) !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
+  const myTodayRev = myTodayTx.filter(t => (t.unitPrice||0) !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
+  const todayFocVol = todayActiveTx.filter(t => (t.unitPrice||0) === 0).reduce((s, t) => s + (t.quantity || 1), 0);
 
   const displayTxList = activeTx.filter(t => t.dateStr === shiftActiveDateStr);
   const displayActiveTxList = displayTxList.filter(t => t.status !== 'VOIDED');
@@ -861,78 +775,56 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   
   const tabVol = displayActiveTxList.reduce((s, t) => s + (t.quantity || 1), 0);
   const myTabVol = displayMyTxList.reduce((s, t) => s + (t.quantity || 1), 0);
-  const tabRev = displayActiveTxList.filter(t => t.unitPrice !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
-  const myTabRev = displayMyTxList.filter(t => t.unitPrice !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
-  const tabFocVol = displayActiveTxList.filter(t => t.unitPrice === 0).reduce((s, t) => s + (t.quantity || 1), 0);
+  const tabRev = displayActiveTxList.filter(t => (t.unitPrice||0) !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
+  const myTabRev = displayMyTxList.filter(t => (t.unitPrice||0) !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
+  const tabFocVol = displayActiveTxList.filter(t => (t.unitPrice||0) === 0).reduce((s, t) => s + (t.quantity || 1), 0);
 
   const processedEntities = useMemo(() => {
     const term = search.toLowerCase();
-    const mapped = entities.map(ent => {
-      const count = todayActiveTx.filter(t => t.entityId === ent.id).reduce((s,t) => s + (t.quantity||1), 0);
-      return { ...ent, todayCount: count };
-    });
-
+    const safeEntities = Array.isArray(entities) ? entities : [];
+    const mapped = safeEntities.map(ent => ({ ...ent, todayCount: todayActiveTx.filter(t => t.entityId === ent.id).reduce((s,t) => s + (t.quantity||1), 0) }));
     const filtered = mapped.filter(e => {
       const nm = (e.name || e.shipName || '').toLowerCase();
       const cp = (e.companyName || e.agentName || '').toLowerCase();
       return nm.includes(term) || cp.includes(term);
     });
-
     return filtered.sort((a, b) => {
       if (b.todayCount !== a.todayCount) return b.todayCount - a.todayCount;
-      const nameA = (a.name || a.shipName || '').toLowerCase();
-      const nameB = (b.name || b.shipName || '').toLowerCase();
-      return nameA.localeCompare(nameB);
+      return (a.name || a.shipName || '').toLowerCase().localeCompare((b.name || b.shipName || '').toLowerCase());
     });
   }, [entities, search, todayActiveTx]);
 
-
   const handleAddTx = async (entity, qty = 1) => {
     if (isReadOnly || !entity) return;
-    
     let unitPrice = globalPrice > 0 ? globalPrice : 20000;
     let activeGasProd = null;
     
     if (dbKeys.divType === 'GAS_INDUSTRI') {
       activeGasProd = customerGasSelections[entity.id] || Object.keys(gasMasterConfig)[0] || 'Oxygen, 6 m³';
       const customGas = entity.gasCustomPrices?.[activeGasProd];
-      const masterGasPrice = gasMasterConfig[activeGasProd] || 150000;
-      unitPrice = getEffectivePrice(customGas, masterGasPrice);
-    } else {
-      unitPrice = getEffectivePrice(entity.price, globalPrice);
-    }
+      unitPrice = getEffectivePrice(customGas, gasMasterConfig[activeGasProd] || 150000);
+    } else { unitPrice = getEffectivePrice(entity.price, globalPrice); }
 
     const txId = 'tx_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
     const txPayload = {
-      entityId: entity.id,
-      entityName: entity.name || entity.shipName,
-      divisionType: dbKeys.divType,
-      quantity: qty,
-      unitPrice: unitPrice,
-      totalAmount: unitPrice * qty,
-      operatorName: user.name,
-      operatorId: user.id,
-      timestamp: Date.now(),
-      dateStr: todayStr,
-      status: 'COMPLETED'
+      entityId: entity.id, entityName: entity.name || entity.shipName, divisionType: dbKeys.divType,
+      quantity: qty, unitPrice: unitPrice, totalAmount: unitPrice * qty,
+      operatorName: user.name, operatorId: user.id, timestamp: Date.now(), dateStr: todayStr, status: 'COMPLETED'
     };
     if (activeGasProd) txPayload.gasProduct = activeGasProd;
 
-    // Optimistic Update globally
-    const updatedTxList = [...allTx, { id: txId, ...txPayload }];
-    setAllTx(updatedTxList); 
-    setLocalData('transactions', updatedTxList);
-
+    const updatedTxList = [...safeAllTx, { id: txId, ...txPayload }];
+    setAllTx(updatedTxList); setLocalData('transactions', updatedTxList);
     setLastTxToast({ id: txId, name: entity.name || entity.shipName, qty, amount: unitPrice * qty });
     setTimeout(() => { setLastTxToast(prev => prev?.id === txId ? null : prev); }, 6000);
 
     try { await setDoc(getDocPath('transactions', txId), txPayload); } 
-    catch (err) { console.warn("Firebase write warning (Offline), operating via local storage fallback.", err); }
+    catch (err) { console.warn("Firebase write err:", err); }
   };
 
   const handleUndo = async (txId) => {
     if (isReadOnly) return;
-    const updatedTxList = allTx.map(t => t.id === txId ? { ...t, status: 'VOIDED', voidedAt: Date.now(), voidedBy: user.name } : t);
+    const updatedTxList = safeAllTx.map(t => t.id === txId ? { ...t, status: 'VOIDED', voidedAt: Date.now(), voidedBy: user.name } : t);
     setAllTx(updatedTxList); setLocalData('transactions', updatedTxList);
     setLastTxToast(null);
     try { await updateDoc(getDocPath('transactions', txId), { status: 'VOIDED', voidedAt: Date.now(), voidedBy: user.name }); } catch(err){ console.warn(err); }
@@ -944,76 +836,55 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     if (!cleanName) return setAddError('Nama wajib diisi.');
     
     const safeEntities = Array.isArray(entities) ? entities : [];
-    if (safeEntities.some(ent => (ent.name || ent.shipName || '').toUpperCase() === cleanName)) {
-      return setAddError(`Nama "${cleanName}" sudah terdaftar.`);
-    }
+    if (safeEntities.some(ent => (ent.name || ent.shipName || '').toUpperCase() === cleanName)) return setAddError(`Nama "${cleanName}" sudah terdaftar.`);
 
-    const newEntity = {
-      id: `${dbKeys.prefix}_${Date.now()}`, 
-      address: newAddr.trim(), 
-      whatsapp: newWa.trim(),
-      portalAccessEnabled: false, 
-      price: null, 
-      gasCustomPrices: {}, 
-      createdAt: Date.now()
-    };
-
+    const newEntity = { id: `${dbKeys.prefix}_${Date.now()}`, address: newAddr.trim(), whatsapp: newWa.trim(), portalAccessEnabled: false, price: null, gasCustomPrices: {}, createdAt: Date.now() };
     newEntity[dbKeys.nameField] = cleanName;
     if (dbKeys.divType === 'MOBIL_TANGKI' || dbKeys.divType === 'GAS_INDUSTRI') newEntity.companyName = newCompany.trim();
     if (dbKeys.divType === 'AIR_KAPAL') newEntity.agentName = newCompany.trim();
-    if (dbKeys.divType === 'GALLON') {
-      newEntity.customerType = newCustType;
-      if (newCustType === 'RESELLER') newEntity.resellerName = newCompany.trim();
-    }
+    if (dbKeys.divType === 'GALLON') { newEntity.customerType = newCustType; if (newCustType === 'RESELLER') newEntity.resellerName = newCompany.trim(); }
 
     const updatedEntities = [...safeEntities, newEntity];
     setEntities(updatedEntities); setLocalData(dbKeys.entity, updatedEntities);
     setIsAddOpen(false);
-    
     try { await setDoc(getDocPath(dbKeys.entity, newEntity.id), newEntity); } catch (err) { console.warn(err); }
   };
-
 
   const getAddButtons = (entity) => {
     const lastMyTxForEntity = activeTx.slice().reverse().find(t => t.entityId === entity.id && t.operatorName === user.name && t.dateStr === todayStr && t.status !== 'VOIDED');
     let btns;
-    
-    if (dbKeys.divType === 'GAS_INDUSTRI') {
-      const isCustomizing = customQtyRow === entity.id;
-      if (isCustomizing) {
-        btns = (
-          <div className="flex items-center gap-1 animate-in fade-in slide-in-from-right-2">
-            <input 
-              type="number" min="1" autoFocus 
-              value={customQtyVal} onChange={e=>setCustomQtyVal(e.target.value)} onWheel={(e) => e.target.blur()}
-              className="w-14 p-1 text-xs font-bold border border-orange-300 rounded-lg text-center outline-none focus:ring-1 focus:ring-orange-500" placeholder="Jml" 
-            />
-            <button onClick={()=>{const q = parseInt(customQtyVal); if(q>0) handleAddTx(entity, q); setCustomQtyRow(null); setCustomQtyVal('');}} className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] rounded-lg cursor-pointer shadow-xs">✔</button>
-            <button onClick={()=>{setCustomQtyRow(null); setCustomQtyVal('');}} className="px-2 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-600 font-black text-[11px] rounded-lg cursor-pointer shadow-xs">✖</button>
-          </div>
-        );
-      } else {
+    const isCustomizing = customQtyRow === entity.id;
+
+    if (isCustomizing) {
+      btns = (
+        <div className="flex items-center gap-1 animate-in fade-in slide-in-from-right-2">
+          <input type="number" min="1" autoFocus value={customQtyVal} onChange={e=>setCustomQtyVal(e.target.value)} onWheel={(e) => e.target.blur()} className="w-14 p-1 text-xs font-bold border border-orange-300 rounded-lg text-center outline-none focus:ring-1 focus:ring-orange-500" placeholder="Jml" />
+          <button onClick={()=>{const q = parseInt(customQtyVal); if(q>0) handleAddTx(entity, q); setCustomQtyRow(null); setCustomQtyVal('');}} className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] rounded-lg shadow-xs cursor-pointer">✔</button>
+          <button onClick={()=>{setCustomQtyRow(null); setCustomQtyVal('');}} className="px-2 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-600 font-black text-[11px] rounded-lg shadow-xs cursor-pointer">✖</button>
+        </div>
+      );
+    } else {
+      if (dbKeys.divType === 'GAS_INDUSTRI') {
         btns = (
           <div className="flex items-center gap-1">
             {[1, 5, 10].map(v => <button key={v} onClick={()=>handleAddTx(entity, v)} className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] rounded-lg shadow-xs cursor-pointer">+{v}</button>)}
             <button onClick={()=>setCustomQtyRow(entity.id)} className="px-2 py-1.5 bg-orange-600 hover:bg-orange-700 text-white font-black text-[11px] rounded-lg shadow-xs cursor-pointer">Kustom</button>
           </div>
         );
+      } else {
+        const qtys = dbKeys.divType === 'AIR_KAPAL' ? [10, 20, 50] : dbKeys.divType === 'GALLON' ? [1, 5, 10, 20] : [1];
+        const showCustom = dbKeys.divType === 'GALLON' || dbKeys.divType === 'AIR_KAPAL';
+        btns = (
+          <div className="flex items-center gap-1">
+            {qtys.map(v => <button key={v} onClick={()=>handleAddTx(entity, v)} className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] rounded-lg shadow-xs cursor-pointer">+{v}</button>)}
+            {showCustom && <button onClick={()=>setCustomQtyRow(entity.id)} className="px-2 py-1.5 bg-orange-600 hover:bg-orange-700 text-white font-black text-[11px] rounded-lg shadow-xs cursor-pointer">Kustom</button>}
+          </div>
+        );
       }
-    } else {
-      const qtys = dbKeys.divType === 'AIR_KAPAL' ? [10, 20, 50] : dbKeys.divType === 'GALLON' ? [1, 5, 10, 20] : [1];
-      btns = (
-        <div className="flex items-center gap-1">
-          {qtys.map(v => <button key={v} onClick={()=>handleAddTx(entity, v)} className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] rounded-lg shadow-xs cursor-pointer">+{v}</button>)}
-        </div>
-      );
     }
-
     return (
       <div className="flex items-center gap-1.5">
-        {lastMyTxForEntity && (
-          <button onClick={()=>handleUndo(lastMyTxForEntity.id)} title="Batalkan Transaksi Terakhir" className="p-1.5 text-red-500 hover:bg-red-50 border border-red-100 rounded-lg cursor-pointer shadow-xs transition-all"><Trash2 size={16} /></button>
-        )}
+        {lastMyTxForEntity && <button onClick={()=>handleUndo(lastMyTxForEntity.id)} title="Batalkan Transaksi Terakhir" className="p-1.5 text-red-500 hover:bg-red-50 border border-red-100 rounded-lg cursor-pointer shadow-xs transition-all"><Trash2 size={16} /></button>}
         {btns}
       </div>
     );
@@ -1025,14 +896,13 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   return (
     <div className="max-w-md sm:max-w-xl mx-auto px-3 sm:px-4 py-4 pb-24 space-y-4 relative">
       <DivisionHeader title={title} icon={icon} price={displayHeaderPrice} priceLabel={priceLabel} colorClass={textClass} onNavigateHome={onNavigateHome} />
-      
       <DivisionSplitStatsCards todayVol={todayVol} myTodayVol={myTodayVol} todayRev={todayRev} myTodayRev={myTodayRev} todayFocVol={todayFocVol} unitLabel={unitLabel} />
 
       {lastTxToast && (
         <div className="bg-slate-900 text-white p-3 rounded-2xl shadow-xl flex items-center justify-between text-xs animate-in slide-in-from-top-2 border border-slate-700 z-50 sticky top-16 shadow-emerald-500/10">
           <div>
             <p className="font-extrabold uppercase text-emerald-400 flex items-center gap-1"><Check size={14}/> Berhasil Input: {lastTxToast.name}</p>
-            <p className="text-[10px] text-slate-300 mt-0.5">{lastTxToast.qty} {unitLabel} • Rp {(lastTxToast.amount || 0).toLocaleString('id-ID')}</p>
+            <p className="text-[10px] text-slate-300 mt-0.5">{lastTxToast.qty || 0} {unitLabel} • Rp {(lastTxToast.amount || 0).toLocaleString('id-ID')}</p>
           </div>
           <button onClick={() => handleUndo(lastTxToast.id)} className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-black text-[11px] rounded-xl cursor-pointer shadow-sm flex items-center gap-1"><X size={12}/> Batalkan</button>
         </div>
@@ -1048,9 +918,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
           <Card className={`p-4 space-y-3 ${variantClass}`}>
             <div className="flex justify-between items-center pb-2 border-b">
               <label className="text-xs font-bold text-slate-700 uppercase flex items-center gap-1"><Users size={14} className={textClass}/> Pilih {formLabel}</label>
-              {canAddEntity && (
-                <Button onClick={()=>{ setNewName(''); setNewCompany(''); setNewCustType('PENGGUNA'); setNewAddr(''); setNewWa(''); setAddError(''); setIsAddOpen(true); }} variant={buttonVariant} className="py-1.5 px-3 text-[11px]"><Plus size={14} /> Baru</Button>
-              )}
+              {canAddEntity && <Button onClick={()=>{ setNewName(''); setNewCompany(''); setNewCustType('PENGGUNA'); setNewAddr(''); setNewWa(''); setAddError(''); setIsAddOpen(true); }} variant={buttonVariant} className="py-1.5 px-3 text-[11px]"><Plus size={14} /> Baru</Button>}
             </div>
             
             <div className="relative">
@@ -1060,7 +928,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
 
             <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
               {processedEntities.map(ent => {
-                const count = ent.todayCount;
+                const count = ent.todayCount || 0;
                 const isActiveToday = count > 0;
                 
                 if (dbKeys.divType === 'GAS_INDUSTRI') {
@@ -1068,9 +936,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                   const masterGasPrice = gasMasterConfig[currentGasProduct] || 150000;
                   const displayItemPrice = getEffectivePrice(ent.gasCustomPrices?.[currentGasProduct], masterGasPrice);
                   const hasCustomGas = ent.gasCustomPrices?.[currentGasProduct] !== undefined && ent.gasCustomPrices?.[currentGasProduct] !== null && ent.gasCustomPrices?.[currentGasProduct] !== '';
-                  const gasClasses = isActiveToday 
-                    ? "flex flex-col p-3.5 rounded-2xl border bg-white border-orange-300 shadow-md ring-1 ring-orange-50 gap-2.5 transition-all"
-                    : "flex flex-col p-3.5 rounded-2xl border bg-orange-50/40 border-orange-100 gap-2.5 hover:bg-orange-50/80 transition-all opacity-80 hover:opacity-100";
+                  const gasClasses = isActiveToday ? "flex flex-col p-3.5 rounded-2xl border bg-white border-orange-300 shadow-md ring-1 ring-orange-50 gap-2.5 transition-all" : "flex flex-col p-3.5 rounded-2xl border bg-orange-50/40 border-orange-100 gap-2.5 hover:bg-orange-50/80 transition-all opacity-80 hover:opacity-100";
 
                   return (
                     <div key={ent.id} className={gasClasses}>
@@ -1103,9 +969,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
 
                 const displayItemPrice = getEffectivePrice(ent.price, globalPrice);
                 const hasCustomPrice = ent.price !== undefined && ent.price !== null && ent.price !== '' && String(ent.price).trim() !== '' && !isNaN(Number(ent.price));
-                const nonGasClasses = isActiveToday
-                  ? "flex justify-between items-center p-3 rounded-xl border bg-white border-slate-300 shadow-md ring-1 ring-slate-100 gap-2 transition-all"
-                  : "flex justify-between items-center p-2.5 rounded-xl border bg-slate-50/70 border-slate-200 gap-2 opacity-80 hover:opacity-100 transition-all hover:bg-slate-100";
+                const nonGasClasses = isActiveToday ? "flex justify-between items-center p-3 rounded-xl border bg-white border-slate-300 shadow-md ring-1 ring-slate-100 gap-2 transition-all" : "flex justify-between items-center p-2.5 rounded-xl border bg-slate-50/70 border-slate-200 gap-2 opacity-80 hover:opacity-100 transition-all hover:bg-slate-100";
 
                 return (
                   <div key={ent.id} className={nonGasClasses}>
@@ -1143,7 +1007,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                 <div key={tx.id} className="flex justify-between items-center p-2.5 bg-slate-50 rounded-xl text-xs border border-slate-100">
                   <div>
                     <p className="font-extrabold uppercase">{tx.entityName} {tx.gasProduct && <span className="text-[10px] font-normal text-orange-700">({tx.gasProduct})</span>}</p>
-                    <p className="text-[10px] text-slate-400">{getMakassarTimeString(tx.timestamp)} WITA — {tx.quantity} {unitLabel} — Op: {tx.operatorName} {tx.unitPrice === 0 && <span className="text-[9px] bg-orange-100 text-orange-700 px-1 py-0.2 rounded font-bold ml-1">FOC</span>}</p>
+                    <p className="text-[10px] text-slate-400">{getMakassarTimeString(tx.timestamp)} WITA — {tx.quantity || 0} {unitLabel} — Op: {tx.operatorName} {(tx.unitPrice || 0) === 0 && <span className="text-[9px] bg-orange-100 text-orange-700 px-1 py-0.2 rounded font-bold ml-1">FOC</span>}</p>
                   </div>
                   <div className="text-right flex items-center gap-2">
                     <div>
@@ -1187,8 +1051,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
               <div className="flex-1">
                 <label className="text-[10px] font-bold uppercase text-slate-500">Tipe Pelanggan</label>
                 <select value={newCustType} onChange={e=>setNewCustType(e.target.value)} className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold uppercase cursor-pointer">
-                  <option value="PENGGUNA">Pengguna</option>
-                  <option value="RESELLER">Reseller</option>
+                  <option value="PENGGUNA">Pengguna</option><option value="RESELLER">Reseller</option>
                 </select>
               </div>
               {newCustType === 'RESELLER' && (
@@ -1214,7 +1077,6 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   );
 };
 
-
 const ReportsModule = ({ user, onNavigateHome }) => {
   const [reportTab, setReportTab] = useState('TODAY');
   const [todaySubMode, setTodaySubMode] = useState('TODAY');
@@ -1224,17 +1086,12 @@ const ReportsModule = ({ user, onNavigateHome }) => {
     const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
   
-  // Custom Range States
   const [rangeStart, setRangeStart] = useState(() => getMakassarDateString());
   const [rangeEnd, setRangeEnd] = useState(() => getMakassarDateString());
-  
   const [selectedDiv, setSelectedDiv] = useState(null);
   const [selectedTrendDate, setSelectedTrendDate] = useState(null);
+  const { allTx } = useContext(AuthContext);
   
-  // CHG-017: Utilize globally hydrated transactions
-  const { allTx } = useContext(AuthContext); 
-  
-  // Master Prices for FOC Valuation
   const [masterPrices, setMasterPrices] = useState({ TANDON: 20000, GALLON: 6000, MOBIL_TANGKI: 350000, AIR_KAPAL: 50000 });
   const [gasMasterConfig, setGasMasterConfig] = useState({});
 
@@ -1245,8 +1102,7 @@ const ReportsModule = ({ user, onNavigateHome }) => {
       unsubs.push(onSnapshot(getDocPath('settings', 'gallon_config'), snap => { if(snap.exists()) setMasterPrices(p=>({...p, GALLON: snap.data().price??6000})); }, e=>console.warn(e)));
       unsubs.push(onSnapshot(getDocPath('settings', 'tangki_config'), snap => { if(snap.exists()) setMasterPrices(p=>({...p, MOBIL_TANGKI: snap.data().price??350000})); }, e=>console.warn(e)));
       unsubs.push(onSnapshot(getDocPath('settings', 'kapal_config'), snap => { if(snap.exists()) setMasterPrices(p=>({...p, AIR_KAPAL: snap.data().price??50000})); }, e=>console.warn(e)));
-      unsubs.push(onSnapshot(getDocPath('settings', 'gas_config'), snap => { if(snap.exists() && snap.data().products) { setGasMasterConfig(snap.data().products); } }, e=>console.warn(e)));
-
+      unsubs.push(onSnapshot(getDocPath('settings', 'gas_config'), snap => { if(snap.exists() && snap.data().products) setGasMasterConfig(snap.data().products); }, e=>console.warn(e)));
     } catch(e){ console.warn(e); }
     return () => unsubs.forEach(u => u && u());
   }, []);
@@ -1274,17 +1130,10 @@ const ReportsModule = ({ user, onNavigateHome }) => {
     return safeAllTx.filter(t => t.dateStr?.startsWith(selectedMonthStr) && t.status !== 'VOIDED');
   }, [reportTab, todaySubMode, selectedDate, selectedWeekDate, selectedMonthStr, rangeStart, rangeEnd, safeAllTx, activeDateStr, todayStr]);
 
-  const totalOmset = activeTx.filter(t => t.unitPrice !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
-  const totalFocVol = activeTx.filter(t => t.unitPrice === 0).reduce((s, t) => s + (t.quantity || 1), 0);
-
-  // FOC Valuation Calculation
-  const totalFocValuation = activeTx.filter(t => t.unitPrice === 0).reduce((sum, t) => {
-    let standardPrice = 0;
-    if (t.divisionType === 'GAS_INDUSTRI') {
-      standardPrice = gasMasterConfig[t.gasProduct] || 150000;
-    } else {
-      standardPrice = masterPrices[t.divisionType] || 20000;
-    }
+  const totalOmset = activeTx.filter(t => (t.unitPrice || 0) !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
+  const totalFocVol = activeTx.filter(t => (t.unitPrice || 0) === 0).reduce((s, t) => s + (t.quantity || 1), 0);
+  const totalFocValuation = activeTx.filter(t => (t.unitPrice || 0) === 0).reduce((sum, t) => {
+    let standardPrice = t.divisionType === 'GAS_INDUSTRI' ? (gasMasterConfig[t.gasProduct] || 150000) : (masterPrices[t.divisionType] || 20000);
     return sum + ((t.quantity || 1) * standardPrice);
   }, 0);
 
@@ -1298,15 +1147,9 @@ const ReportsModule = ({ user, onNavigateHome }) => {
 
   const divRevenues = divs.map(d => {
     const ts = activeTx.filter(t => t.divisionType === d.key);
-    return { 
-      ...d, 
-      rev: ts.filter(t => t.unitPrice !== 0).reduce((s,t) => s+(t.totalAmount||0),0), 
-      vol: ts.reduce((s,t) => s+(t.quantity||1),0), 
-      foc: ts.filter(t => t.unitPrice === 0).reduce((s,t) => s+(t.quantity||1),0),
-      txs: ts 
-    };
+    return { ...d, rev: ts.filter(t => (t.unitPrice||0)!==0).reduce((s,t) => s+(t.totalAmount||0),0), vol: ts.reduce((s,t) => s+(t.quantity||1),0), foc: ts.filter(t => (t.unitPrice||0)===0).reduce((s,t) => s+(t.quantity||1),0), txs: ts };
   });
-  const maxDivRev = Math.max(...divRevenues.map(d => d.rev), 1000);
+  const maxDivRev = Math.max(...divRevenues.map(d => d.rev || 0), 1000);
 
   const filteredAllTx = selectedDiv ? safeAllTx.filter(t => t.divisionType === selectedDiv) : safeAllTx;
 
@@ -1321,12 +1164,12 @@ const ReportsModule = ({ user, onNavigateHome }) => {
         const td = new Date(monday); td.setDate(monday.getDate() + i);
         const ds = `${td.getFullYear()}-${String(td.getMonth() + 1).padStart(2, '0')}-${String(td.getDate()).padStart(2, '0')}`;
         const dayTx = filteredAllTx.filter(t => t.dateStr === ds && t.status !== 'VOIDED');
-        return { name: n, ds, omset: dayTx.filter(t => t.unitPrice !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0) };
+        return { name: n, ds, omset: dayTx.filter(t => (t.unitPrice||0)!==0).reduce((s, t) => s + (t.totalAmount || 0), 0) };
       });
     } catch(e) { console.warn(e); return []; }
   }, [selectedWeekDate, filteredAllTx, reportTab, todayStr]);
 
-  const maxWeek = Math.max(...weeklyData.map(w => w.omset), 10000);
+  const maxWeek = Math.max(...weeklyData.map(w => w.omset || 0), 10000);
 
   const monthData = useMemo(() => {
     if (reportTab !== 'MONTH') return [];
@@ -1338,38 +1181,23 @@ const ReportsModule = ({ user, onNavigateHome }) => {
       for (let i = 1; i <= days; i++) {
         const ds = `${yr}-${String(mo).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
         const txs = filteredAllTx.filter(t => t.dateStr === ds && t.status !== 'VOIDED');
-        res.push({ day: i, ds, omset: txs.filter(t => t.unitPrice !== 0).reduce((s,t) => s + (t.totalAmount||0), 0) });
+        res.push({ day: i, ds, omset: txs.filter(t => (t.unitPrice||0)!==0).reduce((s,t) => s + (t.totalAmount||0), 0) });
       }
       return res;
     } catch(e) { console.warn(e); return []; }
   }, [selectedMonthStr, filteredAllTx, reportTab]);
 
-  const maxMo = Math.max(...monthData.map(m => m.omset), 10000);
+  const maxMo = Math.max(...monthData.map(m => m.omset || 0), 10000);
 
   const handleWhatsAppShare = () => {
-    const text = `*📊 LAPORAN POS*\n💰 Total Omset: Rp ${totalOmset.toLocaleString('id-ID')}${totalFocVol > 0 ? ` (FOC: ${totalFocVol} unit)` : ''}\n\n` +
-      divRevenues.map(d => `- ${d.name}: Vol ${d.vol}${d.foc > 0 ? ` (FOC ${d.foc})` : ''} | Rp ${d.rev.toLocaleString('id-ID')}`).join('\n');
+    const text = `*📊 LAPORAN POS*\n💰 Total Omset: Rp ${(totalOmset||0).toLocaleString('id-ID')}${totalFocVol > 0 ? ` (FOC: ${totalFocVol} unit)` : ''}\n\n` + divRevenues.map(d => `- ${d.name}: Vol ${d.vol || 0}${d.foc > 0 ? ` (FOC ${d.foc})` : ''} | Rp ${(d.rev||0).toLocaleString('id-ID')}`).join('\n');
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
   };
 
   const handleExportCSV = () => {
     if (activeTx.length === 0) return alert("Tidak ada data untuk diekspor pada periode ini.");
-    
     const headers = ["ID Transaksi", "Tanggal", "Jam (WITA)", "Divisi", "Pelanggan / Kapal", "Produk Gas", "Volume (Qty)", "Harga Satuan (Rp)", "Total Penjualan (Rp)", "Operator", "Status"];
-    const rows = activeTx.map(t => [
-      t.id,
-      t.dateStr,
-      getMakassarTimeString(t.timestamp),
-      t.divisionType,
-      `"${t.entityName || ''}"`,
-      t.gasProduct || '-',
-      t.quantity,
-      t.unitPrice,
-      t.totalAmount || 0,
-      `"${t.operatorName || ''}"`,
-      t.status
-    ]);
-
+    const rows = activeTx.map(t => [ t.id, t.dateStr || '-', getMakassarTimeString(t.timestamp), t.divisionType, `"${t.entityName || ''}"`, t.gasProduct || '-', t.quantity || 0, t.unitPrice || 0, t.totalAmount || 0, `"${t.operatorName || ''}"`, t.status ]);
     const csvContent = [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
@@ -1377,9 +1205,7 @@ const ReportsModule = ({ user, onNavigateHome }) => {
     link.setAttribute("href", url);
     link.setAttribute("download", `Export_POS_${reportTab}_${Date.now()}.csv`);
     link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
   return (
@@ -1417,7 +1243,7 @@ const ReportsModule = ({ user, onNavigateHome }) => {
         )}
         {reportTab === 'WEEK' && (
           <div className="flex justify-between items-center pb-3 border-b border-slate-100">
-            <span className="text-xs font-bold text-slate-700 uppercase">Pilih Tanggal (Acuan Minggu)</span>
+            <span className="text-xs font-bold text-slate-700 uppercase">Pilih Tanggal</span>
             <input type="date" value={selectedWeekDate || getMakassarDateString()} onChange={e=>setSelectedWeekDate(e.target.value || getMakassarDateString())} className="p-1.5 bg-slate-50 border rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500 outline-none" onWheel={(e)=>e.target.blur()} />
           </div>
         )}
@@ -1444,10 +1270,10 @@ const ReportsModule = ({ user, onNavigateHome }) => {
             <span className="text-[10px] font-bold text-emerald-200 uppercase tracking-wider block">TOTAL OMSET GABUNGAN (NON-FOC)</span>
             <div className="text-right">
               {totalFocVol > 0 && <span className="text-[10px] font-extrabold bg-orange-500 text-white px-2 py-0.5 rounded shadow-xs block mb-1">Total Volume FOC: {totalFocVol}</span>}
-              {totalFocValuation > 0 && <span className="text-[9px] font-bold text-orange-200 bg-black/20 px-1.5 py-0.5 rounded">Valuasi FOC: Rp {(totalFocValuation || 0).toLocaleString('id-ID')}</span>}
+              {totalFocValuation > 0 && <span className="text-[9px] font-bold text-orange-200 bg-black/20 px-1.5 py-0.5 rounded">Valuasi FOC: Rp {(totalFocValuation||0).toLocaleString('id-ID')}</span>}
             </div>
           </div>
-          <div className="text-3xl font-black relative z-10">Rp {(totalOmset || 0).toLocaleString('id-ID')}</div>
+          <div className="text-3xl font-black relative z-10">Rp {(totalOmset||0).toLocaleString('id-ID')}</div>
         </div>
 
         <div className="pt-2">
@@ -1485,7 +1311,7 @@ const ReportsModule = ({ user, onNavigateHome }) => {
             {reportTab === 'WEEK' ? (
                <div className="grid grid-cols-7 gap-1 items-end h-32 pt-6 pb-2 px-2 bg-slate-50 rounded-xl border border-slate-200">
                  {weeklyData.map(w => {
-                   const hp = maxWeek > 0 ? Math.max(Math.round((w.omset/maxWeek)*100),6) : 6;
+                   const hp = maxWeek > 0 ? Math.max(Math.round(((w.omset||0)/maxWeek)*100),6) : 6;
                    const isSel = w.ds === selectedTrendDate;
                    return (
                      <div key={w.name} onClick={()=>setSelectedTrendDate(prev => prev === w.ds ? null : w.ds)} className="flex flex-col items-center gap-1 h-full justify-end cursor-pointer group">
@@ -1500,10 +1326,10 @@ const ReportsModule = ({ user, onNavigateHome }) => {
                <div className="overflow-x-auto pb-2">
                  <div className="flex gap-1 items-end h-36 pt-6 pb-2 px-2 bg-slate-50 rounded-xl border border-slate-200 min-w-max">
                    {monthData.map(m => {
-                     const hp = maxMo > 0 ? Math.max(Math.round((m.omset/maxMo)*100),6) : 6;
+                     const hp = maxMo > 0 ? Math.max(Math.round(((m.omset||0)/maxMo)*100),6) : 6;
                      const isSel = m.ds === selectedTrendDate;
                      return (
-                       <div key={m.day} onClick={()=>setSelectedTrendDate(prev => prev === m.ds ? null : m.ds)} className="flex flex-col items-center gap-1 h-full justify-end w-6 group cursor-pointer" title={`${m.ds}: Rp ${(m.omset || 0).toLocaleString()}`}>
+                       <div key={m.day} onClick={()=>setSelectedTrendDate(prev => prev === m.ds ? null : m.ds)} className="flex flex-col items-center gap-1 h-full justify-end w-6 group cursor-pointer" title={`${m.ds}: Rp ${(m.omset||0).toLocaleString()}`}>
                          <div className={`w-4 rounded-t transition-colors ${isSel ? 'bg-emerald-600 shadow-md' : 'bg-emerald-400 group-hover:bg-emerald-600'}`} style={{height:`${hp}%`}}></div>
                          <span className={`text-[9px] font-bold ${isSel ? 'text-emerald-700 font-black' : 'text-slate-600'}`}>{m.day}</span>
                        </div>
@@ -1517,26 +1343,13 @@ const ReportsModule = ({ user, onNavigateHome }) => {
       </Card>
       
       {(() => {
-        const trendFilteredTx = selectedTrendDate
-          ? activeTx.filter(t => t.dateStr === selectedTrendDate)
-          : activeTx;
-        
-        const finalGraphTx = selectedDiv
-          ? trendFilteredTx.filter(t => t.divisionType === selectedDiv)
-          : trendFilteredTx;
-
-        return (
-          <PurchasePerformanceGraph 
-            txList={finalGraphTx} 
-            metric={selectedDiv ? 'VOLUME' : 'OMSET'} 
-            subtitle={selectedTrendDate ? `(Data: ${selectedTrendDate})` : ''}
-          />
-        );
+        const trendFilteredTx = selectedTrendDate ? activeTx.filter(t => t.dateStr === selectedTrendDate) : activeTx;
+        const finalGraphTx = selectedDiv ? trendFilteredTx.filter(t => t.divisionType === selectedDiv) : trendFilteredTx;
+        return <PurchasePerformanceGraph txList={finalGraphTx} metric={selectedDiv ? 'VOLUME' : 'OMSET'} subtitle={selectedTrendDate ? `(Data: ${selectedTrendDate})` : ''} />;
       })()}
     </div>
   );
 };
-
 
 const AdminPanel = ({ onNavigateHome }) => {
   const { sessionUser, allUsers, setAllUsers } = useContext(AuthContext);
@@ -1559,12 +1372,7 @@ const AdminPanel = ({ onNavigateHome }) => {
   const [custError, setCustError] = useState('');
   const [suggestedPwd, setSuggestedPwd] = useState('');
   
-  const [custForm, setCustForm] = useState({
-      name: '', address: '', whatsapp: '', username: '',
-      companyName: '', agentName: '', customerType: 'PENGGUNA', resellerName: '', customPrice: '',
-      gasCustomPrices: {}
-  });
-
+  const [custForm, setCustForm] = useState({ name: '', address: '', whatsapp: '', username: '', companyName: '', agentName: '', customerType: 'PENGGUNA', resellerName: '', customPrice: '', gasCustomPrices: {} });
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [newUserName, setNewUserName] = useState('');
@@ -1572,11 +1380,9 @@ const AdminPanel = ({ onNavigateHome }) => {
   const [newUserRole, setNewUserRole] = useState('OPERATOR');
   const [newUserDivs, setNewUserDivs] = useState(['TANDON']);
   const [userAddError, setUserAddError] = useState('');
-
   const [resetTarget, setResetTarget] = useState(null);
   const [resetPwd, setResetPwd] = useState('');
   const [resetMsg, setResetMsg] = useState('');
-
   const [credentialPromptTarget, setCredentialPromptTarget] = useState(null);
   const [promptUsername, setPromptUsername] = useState('');
   const [promptPassword, setPromptPassword] = useState('');
@@ -1585,11 +1391,11 @@ const AdminPanel = ({ onNavigateHome }) => {
   useEffect(() => {
     let unsubs = [];
     try {
-      unsubs.push(onSnapshot(getDocPath('settings', 'tandon_config'), snap => { if(snap.exists()) setPrices(p=>({...p, TANDON: snap.data().price??20000})); }, (err)=>{ console.warn(err); }));
-      unsubs.push(onSnapshot(getDocPath('settings', 'gallon_config'), snap => { if(snap.exists()) setPrices(p=>({...p, GALLON: snap.data().price??6000})); }, (err)=>{ console.warn(err); }));
-      unsubs.push(onSnapshot(getDocPath('settings', 'tangki_config'), snap => { if(snap.exists()) setPrices(p=>({...p, TANGKI: snap.data().price??350000})); }, (err)=>{ console.warn(err); }));
-      unsubs.push(onSnapshot(getDocPath('settings', 'kapal_config'), snap => { if(snap.exists()) setPrices(p=>({...p, KAPAL: snap.data().price??50000})); }, (err)=>{ console.warn(err); }));
-      unsubs.push(onSnapshot(getDocPath('settings', 'gas_config'), snap => { if(snap.exists() && snap.data().products) { setGasProducts(snap.data().products); } }, (err)=>{ console.warn(err); }));
+      unsubs.push(onSnapshot(getDocPath('settings', 'tandon_config'), snap => { if(snap.exists()) setPrices(p=>({...p, TANDON: snap.data().price??20000})); }, e=>console.warn(e)));
+      unsubs.push(onSnapshot(getDocPath('settings', 'gallon_config'), snap => { if(snap.exists()) setPrices(p=>({...p, GALLON: snap.data().price??6000})); }, e=>console.warn(e)));
+      unsubs.push(onSnapshot(getDocPath('settings', 'tangki_config'), snap => { if(snap.exists()) setPrices(p=>({...p, TANGKI: snap.data().price??350000})); }, e=>console.warn(e)));
+      unsubs.push(onSnapshot(getDocPath('settings', 'kapal_config'), snap => { if(snap.exists()) setPrices(p=>({...p, KAPAL: snap.data().price??50000})); }, e=>console.warn(e)));
+      unsubs.push(onSnapshot(getDocPath('settings', 'gas_config'), snap => { if(snap.exists() && snap.data().products) setGasProducts(snap.data().products); }, e=>console.warn(e)));
     } catch(e){ console.warn(e); }
     return () => unsubs.forEach(u => u && u());
   }, []);
@@ -1604,10 +1410,9 @@ const AdminPanel = ({ onNavigateHome }) => {
       const l = snap.docs.map(d=>({id:d.id,...d.data()}));
       if (Array.isArray(l)) { 
         const normalized = l.map(c => ({...c, price: (c.price === '' || c.price === null || c.price === undefined) ? null : c.price}));
-        setCustData(normalized); 
-        setLocalData(conf.key, normalized); 
+        setCustData(normalized); setLocalData(conf.key, normalized); 
       }
-    }, (err) => { console.warn(err); });
+    }, e => console.warn(e));
     return () => unsub();
   }, [activeCategory, activeCustTab]);
 
@@ -1626,15 +1431,11 @@ const AdminPanel = ({ onNavigateHome }) => {
     try { await setDoc(getDocPath('settings', 'gas_config'), { products: updatedProducts, updatedBy: sessionUser.name, updatedAt: Date.now() }, { merge: true }); } catch(e){ console.warn(e); }
   };
 
-
   const generateUniqueUsername = (baseName, existingList, nameKey, currentId = null) => {
-    const cleanBase = baseName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'user';
+    const cleanBase = (baseName || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'user';
     let candidate = cleanBase;
-    let isDuplicate = existingList.some(c => c.username?.toLowerCase() === candidate && c.id !== currentId);
-    if (isDuplicate) {
-      const rand = Math.floor(Math.random() * 900 + 100);
-      candidate = `${cleanBase}${rand}`;
-    }
+    let isDuplicate = existingList.some(c => (c.username || '').toLowerCase() === candidate && c.id !== currentId);
+    if (isDuplicate) { candidate = `${cleanBase}${Math.floor(Math.random() * 900 + 100)}`; }
     return candidate;
   };
 
@@ -1647,18 +1448,17 @@ const AdminPanel = ({ onNavigateHome }) => {
     const nameKey = CUST_CONFIGS[activeCustTab];
     const rawPrice = c.price;
     const hasValidPrice = rawPrice !== undefined && rawPrice !== null && rawPrice !== '' && !isNaN(Number(rawPrice));
-    const customPriceInput = hasValidPrice ? rawPrice : '';
     setCustForm({
         name: c[nameKey.nameField] || '', address: c.address || '', whatsapp: c.whatsapp || '', username: c.username || '',
         companyName: c.companyName || '', agentName: c.agentName || '', customerType: c.customerType || 'PENGGUNA',
-        resellerName: c.resellerName || '', customPrice: customPriceInput, gasCustomPrices: c.gasCustomPrices || {}
+        resellerName: c.resellerName || '', customPrice: hasValidPrice ? rawPrice : '', gasCustomPrices: c.gasCustomPrices || {}
     });
     setEditingCust(c); setCustError(''); setSuggestedPwd(''); setIsCustModalOpen(true);
   };
 
   const handleSaveCustomer = async (e) => {
     e.preventDefault();
-    const cleanName = custForm.name.trim().toUpperCase();
+    const cleanName = (custForm.name || '').trim().toUpperCase();
     if (!cleanName) return setCustError('Nama wajib diisi.');
 
     const conf = CUST_CONFIGS[activeCustTab];
@@ -1666,35 +1466,26 @@ const AdminPanel = ({ onNavigateHome }) => {
     const safeCustData = Array.isArray(custData) ? custData : [];
     if (safeCustData.some(c => (c[nameKey] || '').toUpperCase() === cleanName && c.id !== editingCust?.id)) return setCustError(`Nama "${cleanName}" sudah terdaftar.`);
 
-    const generatedUser = custForm.username.trim().toLowerCase() || generateUniqueUsername(cleanName, safeCustData, nameKey, editingCust?.id);
+    const generatedUser = (custForm.username || '').trim().toLowerCase() || generateUniqueUsername(cleanName, safeCustData, nameKey, editingCust?.id);
 
-    const payload = { 
-      [nameKey]: cleanName, 
-      address: custForm.address.trim(), 
-      whatsapp: custForm.whatsapp.trim(), 
-      username: generatedUser, 
-      updatedAt: Date.now() 
-    };
+    const payload = { [nameKey]: cleanName, address: (custForm.address || '').trim(), whatsapp: (custForm.whatsapp || '').trim(), username: generatedUser, updatedAt: Date.now() };
 
     if (activeCustTab === 'GAS') {
       const cleanGasPrices = {};
       Object.entries(custForm.gasCustomPrices || {}).forEach(([k, v]) => { 
-        if (v !== undefined && v !== null && v !== '' && !isNaN(Number(v))) {
-          cleanGasPrices[k] = Number(v);
-        }
+        if (v !== undefined && v !== null && v !== '' && !isNaN(Number(v))) cleanGasPrices[k] = Number(v);
       });
-      payload.gasCustomPrices = cleanGasPrices;
-      payload.price = null; 
+      payload.gasCustomPrices = cleanGasPrices; payload.price = null; 
     } else {
       const hasInputPrice = custForm.customPrice !== undefined && custForm.customPrice !== null && custForm.customPrice !== '' && !isNaN(Number(custForm.customPrice));
       payload.price = hasInputPrice ? Number(custForm.customPrice) : null; 
     }
 
-    if (activeCustTab === 'TANGKI' || activeCustTab === 'GAS') payload.companyName = custForm.companyName.trim();
-    if (activeCustTab === 'KAPAL') payload.agentName = custForm.agentName.trim();
+    if (activeCustTab === 'TANGKI' || activeCustTab === 'GAS') payload.companyName = (custForm.companyName || '').trim();
+    if (activeCustTab === 'KAPAL') payload.agentName = (custForm.agentName || '').trim();
     if (activeCustTab === 'GALLON') {
         payload.customerType = custForm.customerType;
-        if (custForm.customerType === 'RESELLER') payload.resellerName = custForm.resellerName.trim();
+        if (custForm.customerType === 'RESELLER') payload.resellerName = (custForm.resellerName || '').trim();
     }
 
     if (!editingCust) {
@@ -1707,21 +1498,18 @@ const AdminPanel = ({ onNavigateHome }) => {
     const updatedList = editingCust ? safeCustData.map(c => c.id === editingCust.id ? { ...c, ...payload } : c) : [...safeCustData, payload];
     setCustData(updatedList); setLocalData(conf.key, updatedList); setIsCustModalOpen(false);
 
-    try {
-        if (editingCust) await updateDoc(getDocPath(conf.key, editingCust.id), payload);
-        else await setDoc(getDocPath(conf.key, payload.id), payload);
-    } catch(err) { console.warn(err); }
+    try { if (editingCust) await updateDoc(getDocPath(conf.key, editingCust.id), payload); else await setDoc(getDocPath(conf.key, payload.id), payload); } catch(err) { console.warn(err); }
   };
 
   const handleAddOrUpdateInternalUser = async (e) => {
     e.preventDefault();
     if (!canManageCredentials) return;
-    const cleanName = newUserName.trim();
-    const cleanUser = newUserUser.trim().toLowerCase();
+    const cleanName = (newUserName || '').trim();
+    const cleanUser = (newUserUser || '').trim().toLowerCase();
     if (!cleanName || !cleanUser) return setUserAddError('Nama dan username wajib diisi.');
     
     const safeAllUsers = Array.isArray(allUsers) ? allUsers : [];
-    if (safeAllUsers.some(u => u.username?.toLowerCase() === cleanUser && u.id !== editingUser?.id)) return setUserAddError(`Username "@${cleanUser}" sudah digunakan!`);
+    if (safeAllUsers.some(u => (u.username || '').toLowerCase() === cleanUser && u.id !== editingUser?.id)) return setUserAddError(`Username "@${cleanUser}" sudah digunakan!`);
 
     const userId = editingUser ? editingUser.id : ('usr_' + Date.now());
     const newUserObj = {
@@ -1734,11 +1522,7 @@ const AdminPanel = ({ onNavigateHome }) => {
     const updated = editingUser ? safeAllUsers.map(u => u.id === editingUser.id ? { ...u, ...newUserObj } : u) : [...safeAllUsers, newUserObj];
     setAllUsers(updated); setLocalData('all_users', updated); setIsAddUserOpen(false); setEditingUser(null);
     setNewUserName(''); setNewUserUser(''); setSuggestedPwd(''); setNewUserRole('OPERATOR'); setNewUserDivs(['TANDON']); setUserAddError('');
-    
-    try { 
-      if (editingUser) await updateDoc(getDocPath('users', userId), newUserObj);
-      else await setDoc(getDocPath('users', userId), newUserObj); 
-    } catch(e) { console.warn(e); }
+    try { if (editingUser) await updateDoc(getDocPath('users', userId), newUserObj); else await setDoc(getDocPath('users', userId), newUserObj); } catch(e) { console.warn(e); }
   };
 
   const openEditUser = (u) => {
@@ -1749,19 +1533,12 @@ const AdminPanel = ({ onNavigateHome }) => {
   const togglePortalAccess = async (cust) => {
     if (!canManageCredentials) return;
     const conf = CUST_CONFIGS[activeCustTab];
-    const isCurrentlyEnabled = cust.portalAccessEnabled === true;
-    const newStatus = !isCurrentlyEnabled;
-
+    const newStatus = !(cust.portalAccessEnabled === true);
     if (newStatus && (!cust.username || !cust.password)) {
-      const nameVal = cust[conf.nameField] || '';
-      const defUser = generateUniqueUsername(nameVal, custData, conf.nameField, cust.id);
-      setCredentialPromptTarget({ cust, confKey: conf.key });
-      setPromptUsername(defUser);
-      setPromptPassword(generateSecurePassword(defUser));
-      setPromptError('');
+      const defUser = generateUniqueUsername(cust[conf.nameField] || '', custData, conf.nameField, cust.id);
+      setCredentialPromptTarget({ cust, confKey: conf.key }); setPromptUsername(defUser); setPromptPassword(generateSecurePassword(defUser)); setPromptError('');
       return;
     }
-
     const updated = custData.map(c => c.id === cust.id ? { ...c, portalAccessEnabled: newStatus } : c);
     setCustData(updated); setLocalData(conf.key, updated);
     try { await updateDoc(getDocPath(conf.key, cust.id), { portalAccessEnabled: newStatus }); } catch(e) { console.warn(e); }
@@ -1771,30 +1548,18 @@ const AdminPanel = ({ onNavigateHome }) => {
     e.preventDefault();
     if (!credentialPromptTarget) return;
     const { cust, confKey } = credentialPromptTarget;
-    const cleanUser = promptUsername.trim().toLowerCase();
-    const cleanPwd = promptPassword.trim();
+    const cleanUser = (promptUsername || '').trim().toLowerCase();
+    const cleanPwd = (promptPassword || '').trim();
     if (!cleanUser || !cleanPwd) return setPromptError('Username dan password wajib diisi.');
-
-    const payload = {
-      username: cleanUser,
-      password: cleanPwd,
-      portalAccessEnabled: true,
-      updatedAt: Date.now()
-    };
-
+    const payload = { username: cleanUser, password: cleanPwd, portalAccessEnabled: true, updatedAt: Date.now() };
     const updated = custData.map(c => c.id === cust.id ? { ...c, ...payload } : c);
-    setCustData(updated); setLocalData(confKey, updated);
-    setCredentialPromptTarget(null);
-
-    try {
-      await updateDoc(getDocPath(confKey, cust.id), payload);
-    } catch(err) { console.warn(err); }
+    setCustData(updated); setLocalData(confKey, updated); setCredentialPromptTarget(null);
+    try { await updateDoc(getDocPath(confKey, cust.id), payload); } catch(err) { console.warn(err); }
   };
 
   const handleResetSubmit = async (e) => {
     e.preventDefault();
     if (!canResetPassword || !resetTarget) return;
-
     try {
       if (resetTarget.type === 'USER') {
         const updated = allUsers.map(u => u.id === resetTarget.data.id ? { ...u, password: resetPwd } : u);
@@ -1802,35 +1567,29 @@ const AdminPanel = ({ onNavigateHome }) => {
         await updateDoc(getDocPath('users', resetTarget.data.id), { password: resetPwd });
       } else {
         const confKey = resetTarget.confKey;
-        if (!confKey) throw new Error("Database reference missing");
-        
         const updated = custData.map(c => c.id === resetTarget.data.id ? { ...c, password: resetPwd } : c);
         setCustData(updated); setLocalData(confKey, updated);
         await updateDoc(getDocPath(confKey, resetTarget.data.id), { password: resetPwd });
       }
       setResetMsg('Password diubah!');
       setTimeout(() => { setResetTarget(null); setResetMsg(''); }, 1500);
-    } catch (err) {
-      console.error(err);
-      setResetMsg('Gagal mengubah.');
-    }
+    } catch (err) { console.warn(err); setResetMsg('Gagal mengubah.'); }
   };
 
   const currConf = CUST_CONFIGS[activeCustTab];
   const activeFormLabel = activeCustTab === 'TANDON' ? 'Nama Supir' : activeCustTab === 'KAPAL' ? 'Nama Kapal' : 'Nama Pembeli';
   const filteredCustData = custData.filter(c => {
-    const term = searchCust.toLowerCase();
+    const term = (searchCust || '').toLowerCase();
     const nm = (c[currConf.nameField] || '').toLowerCase();
     const pt = (c.companyName || c.agentName || '').toLowerCase();
     return nm.includes(term) || pt.includes(term);
   });
 
-
   return (
     <div className="max-w-md sm:max-w-3xl mx-auto px-3 sm:px-4 py-4 pb-24 space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <Button variant="outline" onClick={onNavigateHome} className="p-2.5 rounded-xl border-emerald-200"><ArrowLeft size={18} className="textemerald-700"/></Button>
+          <Button variant="outline" onClick={onNavigateHome} className="p-2.5 rounded-xl border-emerald-200"><ArrowLeft size={18} className="text-emerald-700"/></Button>
           <div>
             <span className="text-[10px] font-black tracking-widest text-emerald-700 uppercase">ADMINISTRASI POS</span>
             <h1 className="text-xl font-black text-emerald-900"><Settings size={20} className="inline-block text-emerald-700" /> Panel Admin</h1>
@@ -1848,33 +1607,19 @@ const AdminPanel = ({ onNavigateHome }) => {
         <Card className="p-4 space-y-3 border-emerald-100">
           <div className="flex justify-between items-center border-b border-emerald-50 pb-2">
             <h3 className="font-black text-sm text-emerald-900">Manajemen User Staf</h3>
-            {canManageCredentials && (
-              <Button onClick={()=>{
-                setEditingUser(null); 
-                setNewUserName(''); 
-                setNewUserUser(''); 
-                const defU = generateUniqueUsername('staf', allUsers, 'username');
-                setSuggestedPwd(generateSecurePassword(defU)); 
-                setNewUserRole('OPERATOR'); 
-                setNewUserDivs(['TANDON']); 
-                setIsAddUserOpen(true); 
-                setUserAddError('');
-              }} variant="emerald" className="py-1.5 px-3 text-xs"><Plus size={14}/> Tambah Staf</Button>
-            )}
+            {canManageCredentials && <Button onClick={()=>{ setEditingUser(null); setNewUserName(''); setNewUserUser(''); const defU = generateUniqueUsername('staf', allUsers, 'username'); setSuggestedPwd(generateSecurePassword(defU)); setNewUserRole('OPERATOR'); setNewUserDivs(['TANDON']); setIsAddUserOpen(true); setUserAddError(''); }} variant="emerald" className="py-1.5 px-3 text-xs"><Plus size={14}/> Tambah Staf</Button>}
           </div>
           <div className="space-y-2 max-h-96 overflow-y-auto">
             {(Array.isArray(allUsers) ? allUsers : []).map(u => (
               <div key={u.id} className="p-3 bg-emerald-50/50 border border-emerald-100 rounded-xl flex items-center justify-between text-xs">
                 <div>
                   <span className="font-black uppercase text-emerald-900">{u.name} <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">{u.role}</span></span>
-                  <p className="text-[10px] text-emerald-600">@{u.username} {u.divisions && `• Div: ${u.divisions.join(', ')}`}</p>
+                  <p className="text-[10px] text-emerald-600">@{u.username} {u.divisions && `• Div: ${(u.divisions || []).join(', ')}`}</p>
                 </div>
                 {canManageCredentials && (
                   <div className="flex items-center gap-1.5">
                     <button onClick={()=>openEditUser(u)} title="Edit Staf" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Edit size={15}/></button>
-                    {canResetPassword && (
-                      <button onClick={()=>{setResetTarget({data: u, type: 'USER'}); setResetPwd(generateSecurePassword(u.username)); setResetMsg('');}} title="Reset Password" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Key size={15}/></button>
-                    )}
+                    {canResetPassword && <button onClick={()=>{setResetTarget({data: u, type: 'USER'}); setResetPwd(generateSecurePassword(u.username)); setResetMsg('');}} title="Reset Password" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Key size={15}/></button>}
                   </div>
                 )}
               </div>
@@ -1900,9 +1645,7 @@ const AdminPanel = ({ onNavigateHome }) => {
                 <input type="text" value={searchCust} onChange={e=>setSearchCust(e.target.value)} placeholder="Cari..." className="w-full p-1.5 pr-8 bg-emerald-50 border border-emerald-100 rounded-lg text-xs font-bold uppercase outline-none focus:ring-2 focus:ring-emerald-500" />
                 {searchCust && <button onClick={()=>setSearchCust('')} className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 bg-emerald-200 text-emerald-600 hover:bg-emerald-300 rounded-md cursor-pointer"><X size={12}/></button>}
               </div>
-              {canManageCredentials && (
-                <Button onClick={openAddCust} variant="emerald" className="py-1.5 px-3 text-xs shrink-0"><Plus size={14}/> Tambah Akun</Button>
-              )}
+              {canManageCredentials && <Button onClick={openAddCust} variant="emerald" className="py-1.5 px-3 text-xs shrink-0"><Plus size={14}/> Tambah Akun</Button>}
             </div>
           </div>
           
@@ -1914,13 +1657,12 @@ const AdminPanel = ({ onNavigateHome }) => {
                 const activeMasterPrice = activeCustTab === 'GAS' ? 150000 : (prices[CUST_CONFIGS[activeCustTab].priceKey] ?? 0);
                 let displayPriceText = "";
                 if (activeCustTab === 'GAS') {
-                  const hasCustom = c.gasCustomPrices && Object.keys(c.gasCustomPrices).length > 0;
-                  displayPriceText = hasCustom ? "Beberapa Kustom (Sisanya Master)" : "Full Ikut Master";
+                  displayPriceText = c.gasCustomPrices && Object.keys(c.gasCustomPrices).length > 0 ? "Beberapa Kustom (Sisanya Master)" : "Full Ikut Master";
                 } else {
                   const rawP = c.price;
                   const hasCustP = rawP !== undefined && rawP !== null && rawP !== '' && String(rawP).trim() !== '';
                   const numericP = Number(rawP);
-                  displayPriceText = hasCustP ? `Rp {(numericP || 0).toLocaleString('id-ID')} ${numericP === 0 ? '(FOC)' : '(Khusus)'}` : `Rp ${(activeMasterPrice || 0).toLocaleString('id-ID')} (Master)`;
+                  displayPriceText = hasCustP ? `Rp ${(numericP || 0).toLocaleString('id-ID')} ${(numericP || 0) === 0 ? '(FOC)' : '(Khusus)'}` : `Rp ${(activeMasterPrice || 0).toLocaleString('id-ID')} (Master)`;
                 }
 
                 return (
@@ -1987,17 +1729,13 @@ const AdminPanel = ({ onNavigateHome }) => {
             <label className="text-[10px] font-bold uppercase text-slate-500">Nama Lengkap</label>
             <input type="text" value={newUserName} onChange={e=>{
                 const val = e.target.value; setNewUserName(val); 
-                if(!editingUser) { 
-                  const u = generateUniqueUsername(val, allUsers, 'username');
-                  setNewUserUser(u); setSuggestedPwd(generateSecurePassword(u));
-                }
+                if(!editingUser) { const u = generateUniqueUsername(val, allUsers, 'username'); setNewUserUser(u); setSuggestedPwd(generateSecurePassword(u)); }
             }} placeholder="NAMA LENGKAP STAF" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold" required autoFocus />
           </div>
           <div>
             <label className="text-[10px] font-bold uppercase text-slate-500">Username Login</label>
             <input type="text" value={newUserUser} onChange={e=>{
-                const u = e.target.value; setNewUserUser(u);
-                if (!editingUser) setSuggestedPwd(generateSecurePassword(u));
+                const u = e.target.value; setNewUserUser(u); if (!editingUser) setSuggestedPwd(generateSecurePassword(u));
             }} placeholder="username" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold lowercase" required />
           </div>
           <div>
@@ -2038,10 +1776,8 @@ const AdminPanel = ({ onNavigateHome }) => {
           <div>
             <label className="text-[10px] font-bold uppercase text-slate-500">{activeFormLabel} (Wajib Unik)</label>
             <input type="text" value={custForm.name} onChange={e=>{
-                const val = e.target.value; 
-                const u = generateUniqueUsername(val, custData, currConf.nameField, editingCust?.id);
-                setCustForm(prev => ({ ...prev, name: val, username: u }));
-                if(!editingCust) setSuggestedPwd(generateSecurePassword(u));
+                const val = e.target.value; const u = generateUniqueUsername(val, custData, currConf.nameField, editingCust?.id);
+                setCustForm(prev => ({ ...prev, name: val, username: u })); if(!editingCust) setSuggestedPwd(generateSecurePassword(u));
             }} placeholder={`Masukkan ${activeFormLabel.toLowerCase()}...`} className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold uppercase" required autoFocus />
           </div>
           {(activeCustTab === 'TANGKI' || activeCustTab === 'GAS') && (
@@ -2084,9 +1820,7 @@ const AdminPanel = ({ onNavigateHome }) => {
           </div>
           {activeCustTab === 'GAS' ? (
             <div className="pt-2 border-t border-emerald-100 mt-2">
-              <label className="text-[10px] font-bold uppercase text-emerald-700 flex flex-col mb-2">
-                <span>Harga Khusus Per Produk (Rp)</span><span className="text-[9px] text-slate-400 normal-case font-normal">*Kosongkan kolom yang mengikuti Master Harga (0 untuk FOC)</span>
-              </label>
+              <label className="text-[10px] font-bold uppercase text-emerald-700 flex flex-col mb-2"><span>Harga Khusus Per Produk (Rp)</span><span className="text-[9px] text-slate-400 normal-case font-normal">*Kosongkan kolom yang mengikuti Master Harga (0 untuk FOC)</span></label>
               <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-1">
                 {Object.keys(gasProducts).map(prod => (
                   <div key={prod} className="flex flex-col bg-emerald-50/50 p-1.5 rounded-lg border border-emerald-100">
@@ -2105,8 +1839,7 @@ const AdminPanel = ({ onNavigateHome }) => {
           <div className="pt-2 border-t mt-2">
             <label className="text-[10px] font-bold uppercase text-slate-500">Username Login</label>
             <input type="text" value={custForm.username} onChange={e=>{
-                const u = e.target.value; setCustForm(prev => ({ ...prev, username: u }));
-                if(!editingCust) setSuggestedPwd(generateSecurePassword(u));
+                const u = e.target.value; setCustForm(prev => ({ ...prev, username: u })); if(!editingCust) setSuggestedPwd(generateSecurePassword(u));
             }} placeholder="username" className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold lowercase" required />
           </div>
           {!editingCust && custForm.name && (
@@ -2150,7 +1883,6 @@ const AdminPanel = ({ onNavigateHome }) => {
     </div>
   );
 };
-
 
 const DivisionSelector = ({ user, onSelectDivision }) => {
   const isSuperOrMgmt = ['SUPER_ADMIN', 'MANAGEMENT'].includes(user.role);
@@ -2237,6 +1969,10 @@ const MainApp = () => {
 };
 
 export default function App() {
+  useEffect(() => {
+    isSupported().then(yes => yes && getAnalytics(app)).catch(() => {});
+  }, []);
+
   return (
     <ErrorBoundary>
       <AuthProvider>
