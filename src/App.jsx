@@ -22,6 +22,7 @@ const firebaseConfig = {
   appId: "1:330404051844:web:77e11003081143ff893bd1",
   measurementId: "G-TSSC1J1S0D"
 };
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -270,7 +271,7 @@ const AuthProvider = ({ children }) => {
     return () => { authUnsub(); if (unsub) unsub(); window.removeEventListener('focus', handleFocus); };
   }, []);
 
-  // CHG-019: Global Hydration + Server Time Restraint + Client Division Pruning
+  // CHG-017 & CHG-019 & Improvement 1: Global Hydration + Time Restraint + Universal Role Pruning
   useEffect(() => {
     if (!sessionUser) return;
     const isCustomer = ['DRIVER', 'CUSTOMER_TANGKI', 'CUSTOMER_GALLON', 'CUSTOMER_KAPAL', 'CUSTOMER_GAS'].includes(sessionUser.role);
@@ -282,7 +283,7 @@ const AuthProvider = ({ children }) => {
     if (isCustomer) {
       txQuery = query(getPublicPath('transactions'), where('entityId', '==', sessionUser.id));
     } else if (isOperator) {
-      // CHG-019: Only pull the last 48 hours to save 99% Firebase reads.
+      // Limit operators to 48 hours to save 99% Firebase reads.
       const today = getMakassarDateString();
       const yesterday = getAdjacentDateString(today, -1);
       txQuery = query(getPublicPath('transactions'), where('dateStr', 'in', [today, yesterday]));
@@ -291,8 +292,8 @@ const AuthProvider = ({ children }) => {
     const unsubTx = onSnapshot(txQuery, snap => {
       let l = snap.docs.map(d=>({id:d.id,...d.data()}));
       
-      // CHG-019: Immediately discard divisions the operator does not have access to
-      if (isOperator) {
+      // Improvement 1: Prune divisions for ALL internal staff (Admins/Supervisors/Operators)
+      if (!isCustomer) {
         const allowedDivs = JSON.parse(userDivsStr);
         l = l.filter(t => allowedDivs.includes(t.divisionType));
       }
@@ -547,7 +548,7 @@ const CustomerPortal = ({ user, logout }) => {
                 <div>
                   <p className={`font-black text-xs uppercase ${theme.txt}`}>{tx.dateStr || '-'} <span className="text-[10px] font-medium text-slate-500">({getMakassarTimeString(tx.timestamp)})</span></p>
                   {tx.gasProduct && <p className="text-[10px] font-bold text-orange-700">{tx.gasProduct}</p>}
-                  <p className="text-[10px] text-slate-600 mt-1">{tx.quantity || 0} {theme.label} • Rp {(tx.unitPrice || 0).toLocaleString('id-ID')}/unit {(tx.unitPrice || 0) === 0 && <span className="text-[9px] bg-orange-100 text-orange-700 px-1 py-0.5 rounded font-bold ml-1">FOC</span>}</p>
+                  <p className="text-[10px] text-slate-600 mt-1">{tx.quantity || 0} {theme.label} • Rp {(tx.unitPrice || 0).toLocaleString('id-ID')}/unit {Number(tx.unitPrice) === 0 && <span className="text-[9px] bg-orange-100 text-orange-700 px-1 py-0.5 rounded font-bold ml-1">FOC</span>}</p>
                 </div>
                 <div className="text-right">
                   <p className="font-black text-slate-900">Rp {(tx.totalAmount||0).toLocaleString('id-ID')}</p>
@@ -607,7 +608,7 @@ const PurchasePerformanceGraph = ({ txList = [], metric = 'VOLUME', subtitle = '
       const key = viewMode === 'CUSTOMER' ? (t.entityName || 'UMUM') : (t.operatorName || 'SISTEM');
       if (!dataMap[key]) dataMap[key] = { count: 0, omset: 0 };
       dataMap[key].count += (t.quantity || 1);
-      if ((t.unitPrice || 0) !== 0) dataMap[key].omset += (t.totalAmount || 0);
+      if (Number(t.unitPrice) > 0) dataMap[key].omset += (t.totalAmount || 0);
     });
     
     return Object.entries(dataMap)
@@ -684,6 +685,30 @@ const PurchasePerformanceGraph = ({ txList = [], metric = 'VOLUME', subtitle = '
       </Modal>
     </Card>
   );
+};
+
+// Improvement 5 & 6: Helper to calculate dynamic colors based on price vs master price
+const getEntityColor = (divType, ent, masterPrice, gasMasterConfig) => {
+  if (divType === 'GAS_INDUSTRI') {
+    const gasPrices = ent.gasCustomPrices || {};
+    let hasFoc = false;
+    let hasCustom = false;
+    Object.keys(gasMasterConfig).forEach(k => {
+      const p = gasPrices[k];
+      if (p !== undefined && p !== null && p !== '') {
+        if (Number(p) === 0) hasFoc = true;
+        else if (Number(p) !== Number(gasMasterConfig[k])) hasCustom = true;
+      }
+    });
+    if (hasFoc) return { name: 'text-orange-600', price: 'text-orange-600', badge: 'bg-orange-100 text-orange-800' };
+    if (hasCustom) return { name: 'text-blue-600', price: 'text-blue-600', badge: 'bg-blue-100 text-blue-800' };
+    return { name: 'text-slate-900', price: 'text-emerald-700', badge: 'bg-emerald-100 text-emerald-800' };
+  } else {
+    const p = ent.price;
+    if (p !== undefined && p !== null && p !== '' && Number(p) === 0) return { name: 'text-orange-600', price: 'text-orange-600', badge: 'bg-orange-100 text-orange-800' };
+    if (p !== undefined && p !== null && p !== '' && Number(p) !== Number(masterPrice)) return { name: 'text-blue-600', price: 'text-blue-600', badge: 'bg-blue-100 text-blue-800' };
+    return { name: 'text-slate-900', price: 'text-emerald-700', badge: 'bg-emerald-100 text-emerald-800' };
+  }
 };
 
 const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLabel = '', textClass, variantClass, buttonVariant, onNavigateHome }) => {
@@ -763,11 +788,12 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   const todayActiveTx = activeTx.filter(t => t.dateStr === todayStr && t.status !== 'VOIDED');
   const myTodayTx = todayActiveTx.filter(t => t.operatorName === user.name);
   
+  // Improvement 3 & 4: Strict equality (Number(t.unitPrice) === 0) for bulletproof FOC logic
   const todayVol = todayActiveTx.reduce((s, t) => s + (t.quantity || 1), 0);
   const myTodayVol = myTodayTx.reduce((s, t) => s + (t.quantity || 1), 0);
-  const todayRev = todayActiveTx.filter(t => (t.unitPrice||0) !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
-  const myTodayRev = myTodayTx.filter(t => (t.unitPrice||0) !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
-  const todayFocVol = todayActiveTx.filter(t => (t.unitPrice||0) === 0).reduce((s, t) => s + (t.quantity || 1), 0);
+  const todayRev = todayActiveTx.filter(t => Number(t.unitPrice) > 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
+  const myTodayRev = myTodayTx.filter(t => Number(t.unitPrice) > 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
+  const todayFocVol = todayActiveTx.filter(t => Number(t.unitPrice) === 0).reduce((s, t) => s + (t.quantity || 1), 0);
 
   const displayTxList = activeTx.filter(t => t.dateStr === shiftActiveDateStr);
   const displayActiveTxList = displayTxList.filter(t => t.status !== 'VOIDED');
@@ -775,9 +801,9 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   
   const tabVol = displayActiveTxList.reduce((s, t) => s + (t.quantity || 1), 0);
   const myTabVol = displayMyTxList.reduce((s, t) => s + (t.quantity || 1), 0);
-  const tabRev = displayActiveTxList.filter(t => (t.unitPrice||0) !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
-  const myTabRev = displayMyTxList.filter(t => (t.unitPrice||0) !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
-  const tabFocVol = displayActiveTxList.filter(t => (t.unitPrice||0) === 0).reduce((s, t) => s + (t.quantity || 1), 0);
+  const tabRev = displayActiveTxList.filter(t => Number(t.unitPrice) > 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
+  const myTabRev = displayMyTxList.filter(t => Number(t.unitPrice) > 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
+  const tabFocVol = displayActiveTxList.filter(t => Number(t.unitPrice) === 0).reduce((s, t) => s + (t.quantity || 1), 0);
 
   const processedEntities = useMemo(() => {
     const term = search.toLowerCase();
@@ -931,6 +957,9 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                 const count = ent.todayCount || 0;
                 const isActiveToday = count > 0;
                 
+                // Improvement 5 & 6: Compute dynamic colors based on Master Price rules
+                const colors = getEntityColor(dbKeys.divType, ent, globalPrice, gasMasterConfig);
+                
                 if (dbKeys.divType === 'GAS_INDUSTRI') {
                   const currentGasProduct = customerGasSelections[ent.id] || Object.keys(gasMasterConfig)[0] || 'Oxygen, 6 m³';
                   const masterGasPrice = gasMasterConfig[currentGasProduct] || 150000;
@@ -943,8 +972,8 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                       <div className="flex justify-between items-start">
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
-                            <span className="text-xs font-black uppercase text-slate-900 truncate">{ent.name||ent.shipName}</span>
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${isActiveToday ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>(Total: {count})</span>
+                            <span className={`text-xs font-black uppercase truncate ${colors.name}`}>{ent.name||ent.shipName}</span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${isActiveToday ? colors.badge : 'bg-slate-100 text-slate-500'}`}>(Total: {count})</span>
                           </div>
                           {ent.companyName && <p className="text-[10px] text-slate-500 truncate mt-0.5">PT: {ent.companyName}</p>}
                         </div>
@@ -956,10 +985,10 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                               const cGas = ent.gasCustomPrices?.[gpName];
                               const p = getEffectivePrice(cGas, gasMasterConfig[gpName] || 0);
                               const isCust = cGas !== undefined && cGas !== null && cGas !== '';
-                              return <option key={gpName} value={gpName}>{gpName} - Rp {(p || 0).toLocaleString('id-ID')} {isCust ? '(Khusus)' : ''}</option>
+                              return <option key={gpName} value={gpName}>{gpName} - Rp {(p || 0).toLocaleString('id-ID')} {isCust ? (Number(p)===0 ? '(FOC)' : '(Khusus)') : ''}</option>
                             })}
                           </select>
-                          <span className="text-[10px] text-orange-700 font-bold px-1">Harga: Rp {(displayItemPrice || 0).toLocaleString('id-ID')} {hasCustomGas ? (displayItemPrice===0 ? '(FOC)' : '(Khusus)') : '(Master)'}</span>
+                          <span className={`text-[10px] font-bold px-1 ${hasCustomGas && displayItemPrice===0 ? 'text-orange-700' : (hasCustomGas ? 'text-blue-700' : 'text-slate-700')}`}>Harga: Rp {(displayItemPrice || 0).toLocaleString('id-ID')} {hasCustomGas ? (displayItemPrice===0 ? '(FOC)' : '(Khusus)') : '(Master)'}</span>
                         </div>
                         {!isReadOnly && <div className="flex items-center gap-1 shrink-0 self-end sm:self-auto">{getAddButtons(ent)}</div>}
                       </div>
@@ -975,11 +1004,11 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                   <div key={ent.id} className={nonGasClasses}>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-black uppercase text-slate-900 truncate">{ent.name||ent.shipName}</span>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${isActiveToday ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}>(Total: {count})</span>
+                        <span className={`text-xs font-black uppercase truncate ${colors.name}`}>{ent.name||ent.shipName}</span>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${isActiveToday ? colors.badge : 'bg-slate-200 text-slate-600'}`}>(Total: {count})</span>
                       </div>
                       {ent.companyName && <p className="text-[10px] text-slate-500 truncate mt-0.5">PT: {ent.companyName}</p>}
-                      <p className="text-[10px] text-emerald-700 font-bold mt-0.5">Rp {(displayItemPrice || 0).toLocaleString('id-ID')} {displayItemPrice === 0 ? '(FOC)' : (hasCustomPrice ? '(Khusus)' : '(Master)')}</p>
+                      <p className={`text-[10px] font-bold mt-0.5 ${colors.price}`}>Rp {(displayItemPrice || 0).toLocaleString('id-ID')} {displayItemPrice === 0 ? '(FOC)' : (hasCustomPrice ? '(Khusus)' : '(Master)')}</p>
                     </div>
                     {!isReadOnly && <div className="flex items-center gap-1 shrink-0">{getAddButtons(ent)}</div>}
                   </div>
@@ -1007,7 +1036,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                 <div key={tx.id} className="flex justify-between items-center p-2.5 bg-slate-50 rounded-xl text-xs border border-slate-100">
                   <div>
                     <p className="font-extrabold uppercase">{tx.entityName} {tx.gasProduct && <span className="text-[10px] font-normal text-orange-700">({tx.gasProduct})</span>}</p>
-                    <p className="text-[10px] text-slate-400">{getMakassarTimeString(tx.timestamp)} WITA — {tx.quantity || 0} {unitLabel} — Op: {tx.operatorName} {(tx.unitPrice || 0) === 0 && <span className="text-[9px] bg-orange-100 text-orange-700 px-1 py-0.2 rounded font-bold ml-1">FOC</span>}</p>
+                    <p className="text-[10px] text-slate-400">{getMakassarTimeString(tx.timestamp)} WITA — {tx.quantity || 0} {unitLabel} — Op: {tx.operatorName} {Number(tx.unitPrice) === 0 && <span className="text-[9px] bg-orange-100 text-orange-700 px-1 py-0.2 rounded font-bold ml-1">FOC</span>}</p>
                   </div>
                   <div className="text-right flex items-center gap-2">
                     <div>
@@ -1130,14 +1159,15 @@ const ReportsModule = ({ user, onNavigateHome }) => {
     return safeAllTx.filter(t => t.dateStr?.startsWith(selectedMonthStr) && t.status !== 'VOIDED');
   }, [reportTab, todaySubMode, selectedDate, selectedWeekDate, selectedMonthStr, rangeStart, rangeEnd, safeAllTx, activeDateStr, todayStr]);
 
-  const totalOmset = activeTx.filter(t => (t.unitPrice || 0) !== 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
-  const totalFocVol = activeTx.filter(t => (t.unitPrice || 0) === 0).reduce((s, t) => s + (t.quantity || 1), 0);
-  const totalFocValuation = activeTx.filter(t => (t.unitPrice || 0) === 0).reduce((sum, t) => {
+  // Improvement 3 & 4: Strict equality (Number(t.unitPrice) === 0) for bulletproof FOC logic
+  const totalOmset = activeTx.filter(t => Number(t.unitPrice) > 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
+  const totalFocVol = activeTx.filter(t => Number(t.unitPrice) === 0).reduce((s, t) => s + (t.quantity || 1), 0);
+  const totalFocValuation = activeTx.filter(t => Number(t.unitPrice) === 0).reduce((sum, t) => {
     let standardPrice = t.divisionType === 'GAS_INDUSTRI' ? (gasMasterConfig[t.gasProduct] || 150000) : (masterPrices[t.divisionType] || 20000);
     return sum + ((t.quantity || 1) * standardPrice);
   }, 0);
 
-  const divs = [
+  const allDivs = [
     { key: 'TANDON', name: 'Air Tandon', bg: 'bg-blue-600', txt: 'text-blue-600', unitLabel: 'Tandon' },
     { key: 'GALLON', name: 'Air Gallon', bg: 'bg-indigo-600', txt: 'text-indigo-600', unitLabel: 'Gallon' },
     { key: 'MOBIL_TANGKI', name: 'Mobil Tangki', bg: 'bg-emerald-600', txt: 'text-emerald-600', unitLabel: 'Tangki' },
@@ -1145,9 +1175,13 @@ const ReportsModule = ({ user, onNavigateHome }) => {
     { key: 'GAS_INDUSTRI', name: 'Gas Industri', bg: 'bg-orange-600', txt: 'text-orange-600', unitLabel: 'Tabung' },
   ];
 
+  // Improvement 1: Strict Division Filtering based on User Roles
+  const allowedDivs = user.divisions || [];
+  const divs = allDivs.filter(d => allowedDivs.includes(d.key));
+
   const divRevenues = divs.map(d => {
     const ts = activeTx.filter(t => t.divisionType === d.key);
-    return { ...d, rev: ts.filter(t => (t.unitPrice||0)!==0).reduce((s,t) => s+(t.totalAmount||0),0), vol: ts.reduce((s,t) => s+(t.quantity||1),0), foc: ts.filter(t => (t.unitPrice||0)===0).reduce((s,t) => s+(t.quantity||1),0), txs: ts };
+    return { ...d, rev: ts.filter(t => Number(t.unitPrice) > 0).reduce((s,t) => s+(t.totalAmount||0),0), vol: ts.reduce((s,t) => s+(t.quantity||1),0), foc: ts.filter(t => Number(t.unitPrice)===0).reduce((s,t) => s+(t.quantity||1),0), txs: ts };
   });
   const maxDivRev = Math.max(...divRevenues.map(d => d.rev || 0), 1000);
 
@@ -1164,7 +1198,7 @@ const ReportsModule = ({ user, onNavigateHome }) => {
         const td = new Date(monday); td.setDate(monday.getDate() + i);
         const ds = `${td.getFullYear()}-${String(td.getMonth() + 1).padStart(2, '0')}-${String(td.getDate()).padStart(2, '0')}`;
         const dayTx = filteredAllTx.filter(t => t.dateStr === ds && t.status !== 'VOIDED');
-        return { name: n, ds, omset: dayTx.filter(t => (t.unitPrice||0)!==0).reduce((s, t) => s + (t.totalAmount || 0), 0) };
+        return { name: n, ds, omset: dayTx.filter(t => Number(t.unitPrice) > 0).reduce((s, t) => s + (t.totalAmount || 0), 0) };
       });
     } catch(e) { console.warn(e); return []; }
   }, [selectedWeekDate, filteredAllTx, reportTab, todayStr]);
@@ -1181,7 +1215,7 @@ const ReportsModule = ({ user, onNavigateHome }) => {
       for (let i = 1; i <= days; i++) {
         const ds = `${yr}-${String(mo).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
         const txs = filteredAllTx.filter(t => t.dateStr === ds && t.status !== 'VOIDED');
-        res.push({ day: i, ds, omset: txs.filter(t => (t.unitPrice||0)!==0).reduce((s,t) => s + (t.totalAmount||0), 0) });
+        res.push({ day: i, ds, omset: txs.filter(t => Number(t.unitPrice) > 0).reduce((s,t) => s + (t.totalAmount||0), 0) });
       }
       return res;
     } catch(e) { console.warn(e); return []; }
@@ -1349,6 +1383,30 @@ const ReportsModule = ({ user, onNavigateHome }) => {
       })()}
     </div>
   );
+};
+
+// Improvement 5 & 6: Helper to calculate dynamic colors based on price vs master price for Admin Panel
+const getAdminEntityColor = (activeCustTab, c, masterPrice, gasProducts) => {
+  if (activeCustTab === 'GAS') {
+     const gasPrices = c.gasCustomPrices || {};
+     let hasFoc = false;
+     let hasCustom = false;
+     Object.keys(gasProducts).forEach(k => {
+       const p = gasPrices[k];
+       if (p !== undefined && p !== null && p !== '') {
+         if (Number(p) === 0) hasFoc = true;
+         else if (Number(p) !== Number(gasProducts[k])) hasCustom = true;
+       }
+     });
+     if (hasFoc) return 'text-orange-600';
+     if (hasCustom) return 'text-blue-600';
+     return 'text-emerald-900';
+  } else {
+     const p = c.price;
+     if (p !== undefined && p !== null && p !== '' && Number(p) === 0) return 'text-orange-600';
+     if (p !== undefined && p !== null && p !== '' && Number(p) !== Number(masterPrice)) return 'text-blue-600';
+     return 'text-emerald-900';
+  }
 };
 
 const AdminPanel = ({ onNavigateHome }) => {
@@ -1585,6 +1643,9 @@ const AdminPanel = ({ onNavigateHome }) => {
     return nm.includes(term) || pt.includes(term);
   });
 
+  // Improvement 2: Strong fallback for Master Prices to prevent 0 reading
+  const fallbackMasterPrices = { TANDON: 20000, GALLON: 6000, TANGKI: 350000, KAPAL: 50000 };
+
   return (
     <div className="max-w-md sm:max-w-3xl mx-auto px-3 sm:px-4 py-4 pb-24 space-y-4">
       <div className="flex items-center justify-between">
@@ -1654,7 +1715,13 @@ const AdminPanel = ({ onNavigateHome }) => {
               filteredCustData.map(c => {
                 const nameKey = CUST_CONFIGS[activeCustTab].nameField;
                 const isEnabled = c.portalAccessEnabled === true;
-                const activeMasterPrice = activeCustTab === 'GAS' ? 150000 : (prices[CUST_CONFIGS[activeCustTab].priceKey] ?? 0);
+                
+                // Improvement 2: Strong fallback enforcement to prevent 0 reading
+                const activeMasterPrice = activeCustTab === 'GAS' ? 150000 : (prices[CUST_CONFIGS[activeCustTab].priceKey] || fallbackMasterPrices[CUST_CONFIGS[activeCustTab].priceKey]);
+                
+                // Improvement 5 & 6: Compute dynamic Admin colors
+                const textColor = getAdminEntityColor(activeCustTab, c, activeMasterPrice, gasProducts);
+
                 let displayPriceText = "";
                 if (activeCustTab === 'GAS') {
                   displayPriceText = c.gasCustomPrices && Object.keys(c.gasCustomPrices).length > 0 ? "Beberapa Kustom (Sisanya Master)" : "Full Ikut Master";
@@ -1669,13 +1736,13 @@ const AdminPanel = ({ onNavigateHome }) => {
                   <div key={c.id} className="p-3 bg-emerald-50/50 border border-emerald-100 rounded-xl flex items-center justify-between text-xs gap-3 hover:bg-emerald-50 transition-all">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-black uppercase text-emerald-900 truncate">{c[nameKey]}</span>
+                        <span className={`font-black uppercase truncate ${textColor}`}>{c[nameKey]}</span>
                         <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${isEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>{isEnabled ? 'Portal Aktif' : 'Portal Dinonaktifkan'}</span>
                       </div>
                       {c.companyName && <p className="text-[10px] text-emerald-700 font-bold mt-0.5">PT: {c.companyName}</p>}
                       {c.agentName && <p className="text-[10px] text-emerald-700 font-bold mt-0.5">Agen: {c.agentName}</p>}
                       {c.customerType && <p className="text-[10px] text-emerald-700 font-bold mt-0.5">Tipe: {c.customerType} {c.resellerName && `- ${c.resellerName}`}</p>}
-                      <p className="text-[10px] text-emerald-600 font-mono mt-0.5">@{c.username || 'belum_ada_username'} • Harga: {displayPriceText}</p>
+                      <p className={`text-[10px] font-mono mt-0.5 ${textColor === 'text-emerald-900' ? 'text-emerald-600' : textColor}`}>@{c.username || 'belum_ada_username'} • Harga: {displayPriceText}</p>
                     </div>
                     {canManageCredentials && (
                       <div className="flex items-center gap-1.5 shrink-0">
