@@ -7,10 +7,9 @@ import {
   Users, Settings, Plus, X, LogOut, Droplet, Package, 
   Flame, ChevronRight, ArrowLeft, Truck,
   Share2, Anchor, Trash2, Download, List,
-  PieChart, Key, Ban, Check, Edit, Calendar, BarChart2
+  PieChart, Key, Ban, Check, Edit, Calendar, BarChart2, Printer
 } from 'lucide-react';
 
-// CHG-016: Safe inline Analytics fallback for Vercel
 const Analytics = () => null;
 
 const firebaseConfig = {
@@ -113,6 +112,60 @@ const getEffectivePrice = (customPrice, globalPrice) => {
   return isNaN(parsed) ? gp : parsed;
 };
 
+// CHG-023: Thermal eReceipt Printing Helper with Robust Logo Fallback
+const handlePrintReceipt = (tx) => {
+  const printWindow = window.open('', '_blank', 'width=400,height=600');
+  if (!printWindow) return alert("Izinkan pop-up untuk mencetak struk.");
+  
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>eReceipt - ${tx.id}</title>
+        <style>
+          @page { size: 80mm auto; margin: 0; }
+          body { font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #000; margin: 0 auto; padding: 6mm; width: 68mm; background: #fff; }
+          .center { text-align: center; }
+          .bold { font-weight: bold; }
+          .line { border-bottom: 1px dashed #000; margin: 6px 0; }
+          .flex { display: flex; justify-content: space-between; }
+          .footer { margin-top: 10px; font-size: 9px; text-align: center; }
+          img.logo { width: 38px; height: auto; display: block; margin: 0 auto 4px auto; }
+        </style>
+      </head>
+      <body>
+        <img src="https://kalimas-shipyard.firebaseapp.com/GK%20Logo%20Only.png" class="logo" alt="Logo" onerror="this.onerror=null; this.src='https://placehold.co/100x100/10b981/ffffff?text=GK';" />
+        <div class="center bold" style="font-size: 13px;">PT. GALANGAN KALIMAS</div>
+        <div class="center" style="font-size: 9px;">Jl. Sumber No.112, Margo Mulyo, Balikpapan</div>
+        <div class="center bold" style="margin-top: 4px; font-size: 11px;">STRUK PEMBELIAN (${tx.divisionType || 'POS'})</div>
+        <div class="line"></div>
+        <div>Tanggal: ${tx.dateStr || '-'} ${getMakassarTimeString(tx.timestamp)} WITA</div>
+        <div>Operator: ${tx.operatorName || '-'}</div>
+        ${tx.operatorWhatsApp ? `<div>WhatsApp Op: ${tx.operatorWhatsApp}</div>` : ''}
+        <div class="line"></div>
+        <div class="bold">PELANGGAN:</div>
+        <div>${tx.entityName || '-'}</div>
+        ${tx.gasProduct ? `<div>Produk: ${tx.gasProduct}</div>` : ''}
+        <div class="line"></div>
+        <div class="flex"><span>Jumlah (${tx.quantity || 1} unit):</span> <span>Rp ${((tx.unitPrice || 0) * (tx.quantity || 1)).toLocaleString('id-ID')}</span></div>
+        <div class="flex"><span>Harga Satuan:</span> <span>Rp ${(tx.unitPrice || 0).toLocaleString('id-ID')} ${Number(tx.unitPrice) === 0 ? '(FOC)' : ''}</span></div>
+        <div class="line"></div>
+        <div class="flex bold" style="font-size: 12px;"><span>TOTAL:</span> <span>Rp ${(tx.totalAmount || 0).toLocaleString('id-ID')}</span></div>
+        <div class="line"></div>
+        <div class="footer">
+          <div>eReceipt - tanda tangan tidak diperlukan.</div>
+          <div style="margin-top: 3px; font-weight: bold;">Transaksi ID: ${tx.id}</div>
+        </div>
+        <script>
+          window.onload = function() { window.print(); window.close(); }
+        </script>
+      </body>
+    </html>
+  `;
+  printWindow.document.write(html);
+  printWindow.document.close();
+};
+
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -149,8 +202,8 @@ const GalanganKalimasLogo = ({ size = 'md', variant = 'color', className = '' })
     switch(fallbackLevel) {
       case 0: return '/GK Logo Only.png';
       case 1: return '/GK Logo Only.svg';
-      case 2: return 'public/GK Logo Only.png';
-      case 3: return 'public/GK Logo Only.svg';
+      case 2: return 'https://kalimas-shipyard.firebaseapp.com/GK%20Logo%20Only.png';
+      case 3: return 'public/GK Logo Only.png';
       default: return 'https://placehold.co/100x100/10b981/ffffff?text=GK';
     }
   };
@@ -271,7 +324,7 @@ const AuthProvider = ({ children }) => {
     return () => { authUnsub(); if (unsub) unsub(); window.removeEventListener('focus', handleFocus); };
   }, []);
 
-  // CHG-017 & CHG-019 & Improvement 1: Global Hydration + Time Restraint + Universal Role Pruning
+  // CHG-019: Role-Based Transaction Read Optimization & Division Pruning
   useEffect(() => {
     if (!sessionUser) return;
     const isCustomer = ['DRIVER', 'CUSTOMER_TANGKI', 'CUSTOMER_GALLON', 'CUSTOMER_KAPAL', 'CUSTOMER_GAS'].includes(sessionUser.role);
@@ -283,7 +336,6 @@ const AuthProvider = ({ children }) => {
     if (isCustomer) {
       txQuery = query(getPublicPath('transactions'), where('entityId', '==', sessionUser.id));
     } else if (isOperator) {
-      // Limit operators to 48 hours to save 99% Firebase reads.
       const today = getMakassarDateString();
       const yesterday = getAdjacentDateString(today, -1);
       txQuery = query(getPublicPath('transactions'), where('dateStr', 'in', [today, yesterday]));
@@ -292,7 +344,7 @@ const AuthProvider = ({ children }) => {
     const unsubTx = onSnapshot(txQuery, snap => {
       let l = snap.docs.map(d=>({id:d.id,...d.data()}));
       
-      // Improvement 1: Prune divisions for ALL internal staff (Admins/Supervisors/Operators)
+      // Prune divisions for ALL internal staff based on permissions (CHG-020)
       if (!isCustomer) {
         const allowedDivs = JSON.parse(userDivsStr);
         l = l.filter(t => allowedDivs.includes(t.divisionType));
@@ -421,7 +473,7 @@ const CustomerPortal = ({ user, logout }) => {
   const theme = getTheme(user.role);
   const [selectedDate, setSelectedDate] = useState(() => getMakassarDateString());
   const [selectedGraphDate, setSelectedGraphDate] = useState(() => getMakassarDateString());
-  const [zoomedDate, setZoomedDate] = useState(null);
+  const [hoveredBar, setHoveredBar] = useState(null);
   const { allTx } = useContext(AuthContext);
 
   useEffect(() => { if (selectedDate) setSelectedGraphDate(selectedDate); }, [selectedDate]);
@@ -508,36 +560,48 @@ const CustomerPortal = ({ user, logout }) => {
           </div>
         </Card>
 
+        {/* CHG-021: Upgraded Customer Portal Monthly Volume Graph */}
         <Card className="p-4 space-y-3">
           <div className="flex justify-between items-center pb-2 border-b border-slate-100">
             <h3 className="font-extrabold text-xs uppercase flex items-center gap-1.5 text-slate-800"><BarChart2 size={15} className={theme.txt}/> Grafik Volume Bulanan</h3>
             <span className="text-[10px] font-bold text-slate-500">{monthPrefix}</span>
           </div>
           
-          <div className="pt-6 pb-3 px-1 bg-slate-50 rounded-xl border border-slate-200">
-            <div className="flex w-full h-32 items-end justify-between px-1">
+          {hoveredBar && (
+            <div className="p-2 bg-slate-900 text-white rounded-xl text-xs flex justify-between items-center shadow-md animate-in fade-in">
+              <span className="font-bold">Tgl: {hoveredBar.ds}</span>
+              <span className={`font-black ${theme.txt} bg-white px-2 py-0.5 rounded-md`}>Volume: {hoveredBar.vol} {theme.label}</span>
+            </div>
+          )}
+
+          <div className="relative pt-6 pb-4 px-2 bg-slate-50 rounded-xl border border-slate-200">
+            {/* Y-Axis Scale Lines */}
+            <div className="absolute inset-x-4 top-6 bottom-8 flex flex-col justify-between pointer-events-none opacity-20">
+              <div className="border-b border-dashed border-slate-600 w-full text-[8px] text-right">{maxGraphVol}</div>
+              <div className="border-b border-dashed border-slate-600 w-full text-[8px] text-right">{Math.round(maxGraphVol / 2)}</div>
+              <div className="border-b border-slate-600 w-full"></div>
+            </div>
+
+            <div className="flex w-full h-36 items-end justify-between px-1 relative z-10">
               {monthData.map(m => {
-                const hp = maxGraphVol > 0 ? Math.max((m.vol/maxGraphVol)*100, 3) : 3;
+                const hp = maxGraphVol > 0 ? Math.max((m.vol/maxGraphVol)*100, 4) : 4;
                 const isSel = (selectedGraphDate || safeDateStr) === m.ds;
-                const isZoomed = zoomedDate === m.ds;
                 return (
                   <div 
                     key={m.day} 
-                    className="relative flex-1 h-full mx-[1px] flex flex-col justify-end items-center touch-none group cursor-pointer"
-                    onPointerDown={() => { setZoomedDate(m.ds); setSelectedGraphDate(m.ds); }}
-                    onPointerUp={() => setZoomedDate(null)}
-                    onPointerLeave={() => setZoomedDate(null)}
-                    onPointerCancel={() => setZoomedDate(null)}
+                    className="relative flex-1 h-full mx-[1px] flex flex-col justify-end items-center group cursor-pointer"
+                    onMouseEnter={() => setHoveredBar(m)}
+                    onMouseLeave={() => setHoveredBar(null)}
+                    onClick={() => { setSelectedGraphDate(m.ds); }}
                   >
-                    {(isSel || isZoomed) && <span className={`absolute -top-5 text-[10px] font-black z-30 ${theme.txt}`}>{m.vol || 0}</span>}
-                    <div className={`w-full rounded-t-sm transition-transform duration-200 origin-bottom ${isZoomed ? 'scale-[2.5] z-20 shadow-md' : (isSel ? 'scale-[1.3] z-10 opacity-100 shadow-sm' : 'opacity-40 group-hover:opacity-70')} ${theme.bg}`} style={{height:`${hp}%`}}></div>
-                    {isZoomed && <span className="absolute -bottom-5 text-[9px] font-bold text-slate-700 bg-white px-1 shadow-sm rounded z-30">{m.day}</span>}
+                    <div className={`w-full rounded-t-sm transition-all duration-200 ${isSel ? 'opacity-100 ring-2 ring-white shadow-md' : 'opacity-60 group-hover:opacity-100'} ${theme.bg}`} style={{height:`${hp}%`}}></div>
+                    <span className="absolute -bottom-5 text-[8px] font-bold text-slate-500">{m.day % 5 === 0 || m.day === 1 ? m.day : ''}</span>
                   </div>
                 );
               })}
             </div>
           </div>
-          <p className="text-[9px] text-center text-slate-400 mt-2 italic">Ketuk atau tahan bar pada grafik untuk melihat rincian tanggal.</p>
+          <p className="text-[9px] text-center text-slate-400 mt-2 italic">Arahkan kursor atau ketuk bar grafik untuk melihat rincian tanggal.</p>
         </Card>
 
         <Card className="p-4 space-y-3">
@@ -550,8 +614,11 @@ const CustomerPortal = ({ user, logout }) => {
                   {tx.gasProduct && <p className="text-[10px] font-bold text-orange-700">{tx.gasProduct}</p>}
                   <p className="text-[10px] text-slate-600 mt-1">{tx.quantity || 0} {theme.label} • Rp {(tx.unitPrice || 0).toLocaleString('id-ID')}/unit {Number(tx.unitPrice) === 0 && <span className="text-[9px] bg-orange-100 text-orange-700 px-1 py-0.5 rounded font-bold ml-1">FOC</span>}</p>
                 </div>
-                <div className="text-right">
-                  <p className="font-black text-slate-900">Rp {(tx.totalAmount||0).toLocaleString('id-ID')}</p>
+                <div className="text-right flex items-center gap-2">
+                  <div>
+                    <p className="font-black text-slate-900">Rp {(tx.totalAmount||0).toLocaleString('id-ID')}</p>
+                  </div>
+                  <button onClick={() => handlePrintReceipt(tx)} title="Cetak eReceipt" className="p-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg text-slate-700 cursor-pointer shadow-xs"><Printer size={15}/></button>
                 </div>
               </div>
             ))}
@@ -597,6 +664,7 @@ const DivisionSplitStatsCards = ({ todayVol, myTodayVol, todayRev, myTodayRev, t
   </div>
 );
 
+// CHG-022: Unique Entity Separation using Composite Key (divisionType + entityId)
 const PurchasePerformanceGraph = ({ txList = [], metric = 'VOLUME', subtitle = '' }) => {
   const [viewMode, setViewMode] = useState('CUSTOMER');
   const [isViewAllOpen, setIsViewAllOpen] = useState(false);
@@ -605,14 +673,16 @@ const PurchasePerformanceGraph = ({ txList = [], metric = 'VOLUME', subtitle = '
     const dataMap = {};
     const safeTxList = Array.isArray(txList) ? txList : [];
     safeTxList.forEach(t => {
-      const key = viewMode === 'CUSTOMER' ? (t.entityName || 'UMUM') : (t.operatorName || 'SISTEM');
-      if (!dataMap[key]) dataMap[key] = { count: 0, omset: 0 };
-      dataMap[key].count += (t.quantity || 1);
-      if (Number(t.unitPrice) > 0) dataMap[key].omset += (t.totalAmount || 0);
+      const uniqueKey = viewMode === 'CUSTOMER' ? `${t.divisionType}_${t.entityId || t.entityName || 'UMUM'}` : (t.operatorName || 'SISTEM');
+      const displayName = viewMode === 'CUSTOMER' ? (t.entityName || 'UMUM') : (t.operatorName || 'SISTEM');
+      const divTag = viewMode === 'CUSTOMER' ? ` (${t.divisionType || ''})` : '';
+
+      if (!dataMap[uniqueKey]) dataMap[uniqueKey] = { name: displayName, divTag, count: 0, omset: 0 };
+      dataMap[uniqueKey].count += (t.quantity || 1);
+      if (Number(t.unitPrice) > 0) dataMap[uniqueKey].omset += (t.totalAmount || 0);
     });
     
-    return Object.entries(dataMap)
-      .map(([name, data]) => ({ name, count: data.count, omset: data.omset }))
+    return Object.values(dataMap)
       .sort((a, b) => metric === 'OMSET' ? (b.omset - a.omset) : (b.count - a.count));
   }, [txList, viewMode, metric]);
 
@@ -650,12 +720,13 @@ const PurchasePerformanceGraph = ({ txList = [], metric = 'VOLUME', subtitle = '
         ) : chartData.map((d, idx) => {
           const dataValue = metric === 'OMSET' ? (d.omset||0) : (d.count||0);
           const heightPercent = maxVal > 0 ? Math.max(Math.round((dataValue / maxVal) * 100), 6) : 6;
+          const fullLabel = `${d.name}${d.divTag}`;
           return (
             <div key={idx} className="flex flex-col items-center gap-1 h-full justify-end flex-1 min-w-[30px] group cursor-default">
               <span className="text-[9px] font-bold text-slate-500 opacity-0 group-hover:opacity-100 transition-all whitespace-nowrap">{formatDisplayValue(dataValue)}</span>
               <div className={`w-full max-w-[36px] rounded-t transition-all ${dataValue > 0 ? 'bg-emerald-500 group-hover:bg-emerald-600 shadow-xs' : 'bg-slate-200'}`} style={{ height: `${heightPercent}%` }}></div>
-              <span className="text-[9px] font-bold text-slate-600 text-center leading-tight truncate w-full px-1" title={d.name}>
-                {(d.name || '').length > 8 ? (d.name || '').slice(0,8) + '..' : (d.name || '')}
+              <span className="text-[9px] font-bold text-slate-600 text-center leading-tight truncate w-full px-1" title={fullLabel}>
+                {(d.name || '').length > 6 ? (d.name || '').slice(0,6) + '..' : (d.name || '')}
               </span>
             </div>
           );
@@ -670,8 +741,8 @@ const PurchasePerformanceGraph = ({ txList = [], metric = 'VOLUME', subtitle = '
                 <div className="flex items-center gap-3">
                   <span className="text-[10px] font-black text-slate-400 w-4 text-right">#{idx + 1}</span>
                   <div>
-                    <p className="text-xs font-black uppercase text-slate-800">{d.name}</p>
-                    <p className="text-[10px] font-bold text-emerald-600">Total Vol: {d.count || 0}</p>
+                    <p className="text-xs font-black uppercase text-slate-800">{d.name} <span className="text-[9px] font-bold text-emerald-600">{d.divTag}</span></p>
+                    <p className="text-[10px] font-bold text-slate-500">Total Vol: {d.count || 0}</p>
                   </div>
                 </div>
                 <div className="text-right">
@@ -687,7 +758,6 @@ const PurchasePerformanceGraph = ({ txList = [], metric = 'VOLUME', subtitle = '
   );
 };
 
-// Improvement 5 & 6: Helper to calculate dynamic colors based on price vs master price
 const getEntityColor = (divType, ent, masterPrice, gasMasterConfig) => {
   if (divType === 'GAS_INDUSTRI') {
     const gasPrices = ent.gasCustomPrices || {};
@@ -788,7 +858,6 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   const todayActiveTx = activeTx.filter(t => t.dateStr === todayStr && t.status !== 'VOIDED');
   const myTodayTx = todayActiveTx.filter(t => t.operatorName === user.name);
   
-  // Improvement 3 & 4: Strict equality (Number(t.unitPrice) === 0) for bulletproof FOC logic
   const todayVol = todayActiveTx.reduce((s, t) => s + (t.quantity || 1), 0);
   const myTodayVol = myTodayTx.reduce((s, t) => s + (t.quantity || 1), 0);
   const todayRev = todayActiveTx.filter(t => Number(t.unitPrice) > 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
@@ -835,14 +904,14 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     const txPayload = {
       entityId: entity.id, entityName: entity.name || entity.shipName, divisionType: dbKeys.divType,
       quantity: qty, unitPrice: unitPrice, totalAmount: unitPrice * qty,
-      operatorName: user.name, operatorId: user.id, timestamp: Date.now(), dateStr: todayStr, status: 'COMPLETED'
+      operatorName: user.name, operatorId: user.id, operatorWhatsApp: user.whatsapp || '08123456789', timestamp: Date.now(), dateStr: todayStr, status: 'COMPLETED'
     };
     if (activeGasProd) txPayload.gasProduct = activeGasProd;
 
     const updatedTxList = [...safeAllTx, { id: txId, ...txPayload }];
     setAllTx(updatedTxList); setLocalData('transactions', updatedTxList);
-    setLastTxToast({ id: txId, name: entity.name || entity.shipName, qty, amount: unitPrice * qty });
-    setTimeout(() => { setLastTxToast(prev => prev?.id === txId ? null : prev); }, 6000);
+    setLastTxToast({ id: txId, name: entity.name || entity.shipName, qty, amount: unitPrice * qty, fullTx: { id: txId, ...txPayload } });
+    setTimeout(() => { setLastTxToast(prev => prev?.id === txId ? null : prev); }, 8000);
 
     try { await setDoc(getDocPath('transactions', txId), txPayload); } 
     catch (err) { console.warn("Firebase write err:", err); }
@@ -925,12 +994,15 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
       <DivisionSplitStatsCards todayVol={todayVol} myTodayVol={myTodayVol} todayRev={todayRev} myTodayRev={myTodayRev} todayFocVol={todayFocVol} unitLabel={unitLabel} />
 
       {lastTxToast && (
-        <div className="bg-slate-900 text-white p-3 rounded-2xl shadow-xl flex items-center justify-between text-xs animate-in slide-in-from-top-2 border border-slate-700 z-50 sticky top-16 shadow-emerald-500/10">
+        <div className="bg-slate-900 text-white p-3 rounded-2xl shadow-xl flex items-center justify-between text-xs animate-in slide-in-from-top-2 border border-slate-700 z-50 sticky top-16 shadow-emerald-500/10 gap-2">
           <div>
             <p className="font-extrabold uppercase text-emerald-400 flex items-center gap-1"><Check size={14}/> Berhasil Input: {lastTxToast.name}</p>
             <p className="text-[10px] text-slate-300 mt-0.5">{lastTxToast.qty || 0} {unitLabel} • Rp {(lastTxToast.amount || 0).toLocaleString('id-ID')}</p>
           </div>
-          <button onClick={() => handleUndo(lastTxToast.id)} className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-black text-[11px] rounded-xl cursor-pointer shadow-sm flex items-center gap-1"><X size={12}/> Batalkan</button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button onClick={() => handlePrintReceipt(lastTxToast.fullTx)} className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] rounded-xl cursor-pointer shadow-sm flex items-center gap-1"><Printer size={13}/> eReceipt</button>
+            <button onClick={() => handleUndo(lastTxToast.id)} className="px-2.5 py-1.5 bg-red-600 hover:bg-red-700 text-white font-black text-[11px] rounded-xl cursor-pointer shadow-sm flex items-center gap-1"><X size={12}/> Batalkan</button>
+          </div>
         </div>
       )}
 
@@ -957,7 +1029,6 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                 const count = ent.todayCount || 0;
                 const isActiveToday = count > 0;
                 
-                // Improvement 5 & 6: Compute dynamic colors based on Master Price rules
                 const colors = getEntityColor(dbKeys.divType, ent, globalPrice, gasMasterConfig);
                 
                 if (dbKeys.divType === 'GAS_INDUSTRI') {
@@ -988,7 +1059,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
                               return <option key={gpName} value={gpName}>{gpName} - Rp {(p || 0).toLocaleString('id-ID')} {isCust ? (Number(p)===0 ? '(FOC)' : '(Khusus)') : ''}</option>
                             })}
                           </select>
-                          <span className={`text-[10px] font-bold px-1 ${hasCustomGas && displayItemPrice===0 ? 'text-orange-700' : (hasCustomGas ? 'text-blue-700' : 'text-slate-700')}`}>Harga: Rp {(displayItemPrice || 0).toLocaleString('id-ID')} {hasCustomGas ? (displayItemPrice===0 ? '(FOC)' : '(Khusus)') : '(Master)'}</span>
+                          <span className={`text-[10px] font-bold px-1 ${hasCustomGas && displayItemPrice===0 ? 'text-orange-600' : (hasCustomGas ? 'text-blue-600' : 'text-slate-700')}`}>Harga: Rp {(displayItemPrice || 0).toLocaleString('id-ID')} {hasCustomGas ? (displayItemPrice===0 ? '(FOC)' : '(Khusus)') : '(Master)'}</span>
                         </div>
                         {!isReadOnly && <div className="flex items-center gap-1 shrink-0 self-end sm:self-auto">{getAddButtons(ent)}</div>}
                       </div>
@@ -1033,16 +1104,17 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
             </div>
             <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
               {displayTxList.length === 0 ? <p className="text-xs text-slate-400 text-center py-6 italic">Belum ada transaksi.</p> : displayTxList.slice().reverse().map(tx => (
-                <div key={tx.id} className="flex justify-between items-center p-2.5 bg-slate-50 rounded-xl text-xs border border-slate-100">
-                  <div>
-                    <p className="font-extrabold uppercase">{tx.entityName} {tx.gasProduct && <span className="text-[10px] font-normal text-orange-700">({tx.gasProduct})</span>}</p>
+                <div key={tx.id} className="flex justify-between items-center p-2.5 bg-slate-50 rounded-xl text-xs border border-slate-100 gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-extrabold uppercase truncate">{tx.entityName} {tx.gasProduct && <span className="text-[10px] font-normal text-orange-700">({tx.gasProduct})</span>}</p>
                     <p className="text-[10px] text-slate-400">{getMakassarTimeString(tx.timestamp)} WITA — {tx.quantity || 0} {unitLabel} — Op: {tx.operatorName} {Number(tx.unitPrice) === 0 && <span className="text-[9px] bg-orange-100 text-orange-700 px-1 py-0.2 rounded font-bold ml-1">FOC</span>}</p>
                   </div>
-                  <div className="text-right flex items-center gap-2">
+                  <div className="text-right flex items-center gap-2 shrink-0">
                     <div>
                       <p className={`font-black ${textClass}`}>Rp {(tx.totalAmount||0).toLocaleString('id-ID')}</p>
                       <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${tx.status==='VOIDED'?'bg-red-100 text-red-700':'bg-emerald-100 text-emerald-800'}`}>{tx.status==='VOIDED'?'DIBATALKAN':'SELESAI'}</span>
                     </div>
+                    <button onClick={()=>handlePrintReceipt(tx)} title="Cetak eReceipt" className="p-1.5 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg text-slate-700 cursor-pointer shadow-xs"><Printer size={16}/></button>
                     {(canVoidAny || (tx.operatorName === user.name && tx.dateStr === todayStr)) && tx.status !== 'VOIDED' && !isReadOnly && (
                       <button onClick={()=>handleUndo(tx.id)} title="Batalkan Transaksi" className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg cursor-pointer transition-colors"><Trash2 size={16}/></button>
                     )}
@@ -1142,9 +1214,10 @@ const ReportsModule = ({ user, onNavigateHome }) => {
 
   const safeAllTx = Array.isArray(allTx) ? allTx : [];
   const activeTx = useMemo(() => {
-    if (reportTab === 'TODAY') return safeAllTx.filter(t => t.dateStr === activeDateStr && t.status !== 'VOIDED');
-    if (reportTab === 'RANGE') return safeAllTx.filter(t => t.dateStr >= rangeStart && t.dateStr <= rangeEnd && t.status !== 'VOIDED');
-    if (reportTab === 'WEEK') {
+    let baseList = safeAllTx;
+    if (reportTab === 'TODAY') baseList = safeAllTx.filter(t => t.dateStr === activeDateStr && t.status !== 'VOIDED');
+    else if (reportTab === 'RANGE') baseList = safeAllTx.filter(t => t.dateStr >= rangeStart && t.dateStr <= rangeEnd && t.status !== 'VOIDED');
+    else if (reportTab === 'WEEK') {
       try {
         const parts = (selectedWeekDate || todayStr).split('-').map(Number);
         const d = new Date(parts[0], parts[1] - 1, parts[2]);
@@ -1153,17 +1226,38 @@ const ReportsModule = ({ user, onNavigateHome }) => {
         const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
         const s = `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
         const e = `${sunday.getFullYear()}-${String(sunday.getMonth() + 1).padStart(2, '0')}-${String(sunday.getDate()).padStart(2, '0')}`;
-        return safeAllTx.filter(t => t.dateStr >= s && t.dateStr <= e && t.status !== 'VOIDED');
-      } catch (err) { console.warn(err); return safeAllTx.filter(t => t.dateStr === todayStr && t.status !== 'VOIDED'); }
+        baseList = safeAllTx.filter(t => t.dateStr >= s && t.dateStr <= e && t.status !== 'VOIDED');
+      } catch (err) { console.warn(err); baseList = safeAllTx.filter(t => t.dateStr === todayStr && t.status !== 'VOIDED'); }
+    } else {
+      baseList = safeAllTx.filter(t => t.dateStr?.startsWith(selectedMonthStr) && t.status !== 'VOIDED');
     }
-    return safeAllTx.filter(t => t.dateStr?.startsWith(selectedMonthStr) && t.status !== 'VOIDED');
-  }, [reportTab, todaySubMode, selectedDate, selectedWeekDate, selectedMonthStr, rangeStart, rangeEnd, safeAllTx, activeDateStr, todayStr]);
 
-  // Improvement 3 & 4: Strict equality (Number(t.unitPrice) === 0) for bulletproof FOC logic
+    // CHG-020: Admin division-filtered reports enforcement
+    const isSuperOrMgmt = ['SUPER_ADMIN', 'MANAGEMENT'].includes(user.role);
+    const userDivs = user.divisions || [];
+    if (!isSuperOrMgmt) {
+      baseList = baseList.filter(t => userDivs.includes(t.divisionType));
+    }
+    return baseList;
+  }, [reportTab, todaySubMode, selectedDate, selectedWeekDate, selectedMonthStr, rangeStart, rangeEnd, safeAllTx, activeDateStr, todayStr, user.role, JSON.stringify(user.divisions || [])]);
+
   const totalOmset = activeTx.filter(t => Number(t.unitPrice) > 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
   const totalFocVol = activeTx.filter(t => Number(t.unitPrice) === 0).reduce((s, t) => s + (t.quantity || 1), 0);
+  
+  // CHG-020: Dynamic division-aware FOC valuation
   const totalFocValuation = activeTx.filter(t => Number(t.unitPrice) === 0).reduce((sum, t) => {
-    let standardPrice = t.divisionType === 'GAS_INDUSTRI' ? (gasMasterConfig[t.gasProduct] || 150000) : (masterPrices[t.divisionType] || 20000);
+    let standardPrice = 20000;
+    if (t.divisionType === 'GAS_INDUSTRI') {
+      standardPrice = gasMasterConfig[t.gasProduct] || 150000;
+    } else if (t.divisionType === 'MOBIL_TANGKI') {
+      standardPrice = masterPrices.MOBIL_TANGKI || 350000;
+    } else if (t.divisionType === 'GALLON') {
+      standardPrice = masterPrices.GALLON || 6000;
+    } else if (t.divisionType === 'AIR_KAPAL') {
+      standardPrice = masterPrices.AIR_KAPAL || 50000;
+    } else if (t.divisionType === 'TANDON') {
+      standardPrice = masterPrices.TANDON || 20000;
+    }
     return sum + ((t.quantity || 1) * standardPrice);
   }, 0);
 
@@ -1175,7 +1269,6 @@ const ReportsModule = ({ user, onNavigateHome }) => {
     { key: 'GAS_INDUSTRI', name: 'Gas Industri', bg: 'bg-orange-600', txt: 'text-orange-600', unitLabel: 'Tabung' },
   ];
 
-  // Improvement 1: Strict Division Filtering based on User Roles
   const allowedDivs = user.divisions || [];
   const divs = allDivs.filter(d => allowedDivs.includes(d.key));
 
@@ -1185,7 +1278,7 @@ const ReportsModule = ({ user, onNavigateHome }) => {
   });
   const maxDivRev = Math.max(...divRevenues.map(d => d.rev || 0), 1000);
 
-  const filteredAllTx = selectedDiv ? safeAllTx.filter(t => t.divisionType === selectedDiv) : safeAllTx;
+  const filteredAllTx = selectedDiv ? activeTx.filter(t => t.divisionType === selectedDiv) : activeTx;
 
   const weeklyData = useMemo(() => {
     if (reportTab !== 'WEEK') return [];
@@ -1385,7 +1478,6 @@ const ReportsModule = ({ user, onNavigateHome }) => {
   );
 };
 
-// Improvement 5 & 6: Helper to calculate dynamic colors based on price vs master price for Admin Panel
 const getAdminEntityColor = (activeCustTab, c, masterPrice, gasProducts) => {
   if (activeCustTab === 'GAS') {
      const gasPrices = c.gasCustomPrices || {};
@@ -1643,7 +1735,6 @@ const AdminPanel = ({ onNavigateHome }) => {
     return nm.includes(term) || pt.includes(term);
   });
 
-  // Improvement 2: Strong fallback for Master Prices to prevent 0 reading
   const fallbackMasterPrices = { TANDON: 20000, GALLON: 6000, TANGKI: 350000, KAPAL: 50000 };
 
   return (
@@ -1716,10 +1807,8 @@ const AdminPanel = ({ onNavigateHome }) => {
                 const nameKey = CUST_CONFIGS[activeCustTab].nameField;
                 const isEnabled = c.portalAccessEnabled === true;
                 
-                // Improvement 2: Strong fallback enforcement to prevent 0 reading
                 const activeMasterPrice = activeCustTab === 'GAS' ? 150000 : (prices[CUST_CONFIGS[activeCustTab].priceKey] || fallbackMasterPrices[CUST_CONFIGS[activeCustTab].priceKey]);
                 
-                // Improvement 5 & 6: Compute dynamic Admin colors
                 const textColor = getAdminEntityColor(activeCustTab, c, activeMasterPrice, gasProducts);
 
                 let displayPriceText = "";
