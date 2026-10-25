@@ -112,7 +112,7 @@ const getEffectivePrice = (customPrice, globalPrice) => {
   return isNaN(parsed) ? gp : parsed;
 };
 
-// CHG-025: Thermal eReceipt Printing Helper with Dynamic Origin URL Logo Resolution
+// CHG-025: Thermal eReceipt Printing Helper with Dynamic Origin URL Logo Resolution (Enlarged width: 80px)
 const handlePrintReceipt = (tx) => {
   const printWindow = window.open('', '_blank', 'width=400,height=600');
   if (!printWindow) return alert("Izinkan pop-up untuk mencetak struk.");
@@ -134,7 +134,7 @@ const handlePrintReceipt = (tx) => {
           .line { border-bottom: 1px dashed #000; margin: 6px 0; }
           .flex { display: flex; justify-content: space-between; }
           .footer { margin-top: 10px; font-size: 9px; text-align: center; }
-          img.logo { width: 40px; height: auto; display: block; margin: 0 auto 4px auto; }
+          img.logo { width: 80px; height: auto; display: block; margin: 0 auto 6px auto; }
         </style>
       </head>
       <body>
