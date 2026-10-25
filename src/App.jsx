@@ -112,12 +112,14 @@ const getEffectivePrice = (customPrice, globalPrice) => {
   return isNaN(parsed) ? gp : parsed;
 };
 
-// CHG-024: Thermal eReceipt Printing Helper with Base64 Embedded Logo for Mobile & Mac Reliability
+// CHG-025: Thermal eReceipt Printing Helper with Dynamic Origin URL Logo Resolution
 const handlePrintReceipt = (tx) => {
   const printWindow = window.open('', '_blank', 'width=400,height=600');
   if (!printWindow) return alert("Izinkan pop-up untuk mencetak struk.");
   
-  const logoBase64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABxgSmjAAAACXBIWXMAAAsTAAALEwEAmpwYAAAAIGNIUk0AAHolAACAgwAA+f8AAIDpAAB1MAAA6mAAADqYAAAXb5JfxUYAAAA6SURBVHja7cExAQAAAMKg9U9tDB8gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIB3A12bAAE8g91yAAAAAElFTkSuQmCC";
+  const appOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+  const primaryLogoUrl = `${appOrigin}/GK Logo Only.png`;
+  const fallbackLogoUrl = 'https://placehold.co/100x100/10b981/ffffff?text=GK';
 
   const html = `
     <!DOCTYPE html>
@@ -136,7 +138,7 @@ const handlePrintReceipt = (tx) => {
         </style>
       </head>
       <body>
-        <img src="${logoBase64}" class="logo" alt="Logo" onerror="this.onerror=null; this.src='https://placehold.co/100x100/10b981/ffffff?text=GK';" />
+        <img src="${primaryLogoUrl}" class="logo" alt="Logo" onerror="this.onerror=null; this.src='${fallbackLogoUrl}';" />
         <div class="center bold" style="font-size: 13px;">PT. GALANGAN KALIMAS</div>
         <div class="center" style="font-size: 9px;">Jl. Sumber No.112, Margo Mulyo, Balikpapan</div>
         <div class="center bold" style="margin-top: 4px; font-size: 11px;">STRUK PEMBELIAN (${tx.divisionType || 'POS'})</div>
