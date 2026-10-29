@@ -112,7 +112,7 @@ const getEffectivePrice = (customPrice, globalPrice) => {
   return isNaN(parsed) ? gp : parsed;
 };
 
-// CHG-025: Thermal eReceipt Printing Helper with Dynamic Origin URL Logo Resolution (Enlarged width: 80px)
+// CHG-025: Thermal eReceipt Printing Helper with Dynamic Origin URL Logo Resolution & 80px Width
 const handlePrintReceipt = (tx) => {
   const printWindow = window.open('', '_blank', 'width=400,height=600');
   if (!printWindow) return alert("Izinkan pop-up untuk mencetak struk.");
@@ -328,7 +328,6 @@ const AuthProvider = ({ children }) => {
     return () => { authUnsub(); if (unsub) unsub(); window.removeEventListener('focus', handleFocus); };
   }, []);
 
-  // CHG-019: Role-Based Transaction Read Optimization & Division Pruning
   useEffect(() => {
     if (!sessionUser) return;
     const isCustomer = ['DRIVER', 'CUSTOMER_TANGKI', 'CUSTOMER_GALLON', 'CUSTOMER_KAPAL', 'CUSTOMER_GAS'].includes(sessionUser.role);
@@ -348,7 +347,6 @@ const AuthProvider = ({ children }) => {
     const unsubTx = onSnapshot(txQuery, snap => {
       let l = snap.docs.map(d=>({id:d.id,...d.data()}));
       
-      // Prune divisions for ALL internal staff based on permissions (CHG-020)
       if (!isCustomer) {
         const allowedDivs = JSON.parse(userDivsStr);
         l = l.filter(t => allowedDivs.includes(t.divisionType));
@@ -564,7 +562,6 @@ const CustomerPortal = ({ user, logout }) => {
           </div>
         </Card>
 
-        {/* CHG-021: Upgraded Customer Portal Monthly Volume Graph */}
         <Card className="p-4 space-y-3">
           <div className="flex justify-between items-center pb-2 border-b border-slate-100">
             <h3 className="font-extrabold text-xs uppercase flex items-center gap-1.5 text-slate-800"><BarChart2 size={15} className={theme.txt}/> Grafik Volume Bulanan</h3>
@@ -579,7 +576,6 @@ const CustomerPortal = ({ user, logout }) => {
           )}
 
           <div className="relative pt-6 pb-4 px-2 bg-slate-50 rounded-xl border border-slate-200">
-            {/* Y-Axis Scale Lines */}
             <div className="absolute inset-x-4 top-6 bottom-8 flex flex-col justify-between pointer-events-none opacity-20">
               <div className="border-b border-dashed border-slate-600 w-full text-[8px] text-right">{maxGraphVol}</div>
               <div className="border-b border-dashed border-slate-600 w-full text-[8px] text-right">{Math.round(maxGraphVol / 2)}</div>
@@ -668,7 +664,6 @@ const DivisionSplitStatsCards = ({ todayVol, myTodayVol, todayRev, myTodayRev, t
   </div>
 );
 
-// CHG-022: Unique Entity Separation using Composite Key (divisionType + entityId)
 const PurchasePerformanceGraph = ({ txList = [], metric = 'VOLUME', subtitle = '' }) => {
   const [viewMode, setViewMode] = useState('CUSTOMER');
   const [isViewAllOpen, setIsViewAllOpen] = useState(false);
@@ -677,6 +672,7 @@ const PurchasePerformanceGraph = ({ txList = [], metric = 'VOLUME', subtitle = '
     const dataMap = {};
     const safeTxList = Array.isArray(txList) ? txList : [];
     safeTxList.forEach(t => {
+      // CHG-022: Unique Entity Separation using composite key to prevent division name collisions
       const uniqueKey = viewMode === 'CUSTOMER' ? `${t.divisionType}_${t.entityId || t.entityName || 'UMUM'}` : (t.operatorName || 'SISTEM');
       const displayName = viewMode === 'CUSTOMER' ? (t.entityName || 'UMUM') : (t.operatorName || 'SISTEM');
       const divTag = viewMode === 'CUSTOMER' ? ` (${t.divisionType || ''})` : '';
@@ -811,7 +807,8 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     'CO₂, 25 kg': 550000, 'LPG, 50 kg': 1500000, 'LPG, 12 kg': 275000, 'Oxygen Medis, 2 m³': 100000, 'Oxygen Medis, 6 m³': 150000
   });
   const [customerGasSelections, setCustomerGasSelections] = useState({});
-  const [shiftViewDate, setShiftViewDate] = useState('TODAY');
+  const [reportDateMode, setReportDateMode] = useState('TODAY'); // 'TODAY', 'YESTERDAY', or 'CUSTOM'
+  const [customReportDate, setCustomReportDate] = useState(() => getMakassarDateString());
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [newName, setNewName] = useState('');
@@ -826,7 +823,9 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   const [lastTxToast, setLastTxToast] = useState(null);
 
   const todayStr = useMemo(() => getMakassarDateString(), []);
-  const shiftActiveDateStr = shiftViewDate === 'TODAY' ? todayStr : getAdjacentDateString(todayStr, -1);
+  const yesterdayStr = useMemo(() => getAdjacentDateString(todayStr, -1), [todayStr]);
+  
+  const shiftActiveDateStr = reportDateMode === 'TODAY' ? todayStr : (reportDateMode === 'YESTERDAY' ? yesterdayStr : (customReportDate || todayStr));
 
   useEffect(() => {
     let unsubs = [];
@@ -1099,15 +1098,22 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
         <div className="space-y-4">
           <DivisionSplitStatsCards todayVol={tabVol} myTodayVol={myTabVol} todayRev={tabRev} myTodayRev={myTabRev} todayFocVol={tabFocVol} unitLabel={unitLabel} />
           <Card className="p-4 space-y-3">
-            <div className="flex justify-between items-center pb-2 border-b border-slate-100">
-              <h3 className="font-extrabold text-xs uppercase text-slate-800">Riwayat Harian</h3>
-              <div className="flex bg-slate-100 p-1 rounded-xl gap-1 text-[11px] font-bold shadow-inner">
-                <button onClick={()=>setShiftViewDate('TODAY')} className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${shiftViewDate==='TODAY'?'bg-white shadow-xs text-emerald-700':'text-slate-500'}`}>Hari Ini</button>
-                <button onClick={()=>setShiftViewDate('YESTERDAY')} className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${shiftViewDate==='YESTERDAY'?'bg-white shadow-xs text-emerald-700':'text-slate-500'}`}>Kemarin</button>
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-3 border-b border-slate-100 gap-3">
+              <h3 className="font-extrabold text-xs uppercase text-slate-800">Riwayat Tanggal: <span className={textClass}>{shiftActiveDateStr}</span></h3>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button onClick={()=>setReportDateMode('TODAY')} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${reportDateMode==='TODAY'?'bg-emerald-600 text-white':'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>Hari Ini</button>
+                <button onClick={()=>setReportDateMode('YESTERDAY')} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${reportDateMode==='YESTERDAY'?'bg-emerald-600 text-white':'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>Kemarin</button>
+                <input 
+                  type="date" 
+                  value={customReportDate} 
+                  onChange={e => { if(e.target.value) { setCustomReportDate(e.target.value); setReportDateMode('CUSTOM'); } }} 
+                  className={`p-1.5 rounded-xl text-xs font-bold border outline-none cursor-pointer ${reportDateMode==='CUSTOM' ? 'bg-emerald-50 border-emerald-500 text-emerald-800' : 'bg-slate-100 border-slate-200 text-slate-700'}`} 
+                  onWheel={(e)=>e.target.blur()} 
+                />
               </div>
             </div>
             <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-              {displayTxList.length === 0 ? <p className="text-xs text-slate-400 text-center py-6 italic">Belum ada transaksi.</p> : displayTxList.slice().reverse().map(tx => (
+              {displayTxList.length === 0 ? <p className="text-xs text-slate-400 text-center py-6 italic">Belum ada transaksi pada tanggal {shiftActiveDateStr}.</p> : displayTxList.slice().reverse().map(tx => (
                 <div key={tx.id} className="flex justify-between items-center p-2.5 bg-slate-50 rounded-xl text-xs border border-slate-100 gap-2">
                   <div className="min-w-0 flex-1">
                     <p className="font-extrabold uppercase truncate">{tx.entityName} {tx.gasProduct && <span className="text-[10px] font-normal text-orange-700">({tx.gasProduct})</span>}</p>
@@ -1127,7 +1133,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
               ))}
             </div>
           </Card>
-          <PurchasePerformanceGraph txList={displayActiveTxList} />
+          <PurchasePerformanceGraph txList={displayActiveTxList} subtitle={`(${shiftActiveDateStr})`} />
         </div>
       )}
 
@@ -1236,7 +1242,6 @@ const ReportsModule = ({ user, onNavigateHome }) => {
       baseList = safeAllTx.filter(t => t.dateStr?.startsWith(selectedMonthStr) && t.status !== 'VOIDED');
     }
 
-    // CHG-020: Admin division-filtered reports enforcement
     const isSuperOrMgmt = ['SUPER_ADMIN', 'MANAGEMENT'].includes(user.role);
     const userDivs = user.divisions || [];
     if (!isSuperOrMgmt) {
@@ -1248,7 +1253,6 @@ const ReportsModule = ({ user, onNavigateHome }) => {
   const totalOmset = activeTx.filter(t => Number(t.unitPrice) > 0).reduce((s, t) => s + (t.totalAmount || 0), 0);
   const totalFocVol = activeTx.filter(t => Number(t.unitPrice) === 0).reduce((s, t) => s + (t.quantity || 1), 0);
   
-  // CHG-020: Dynamic division-aware FOC valuation
   const totalFocValuation = activeTx.filter(t => Number(t.unitPrice) === 0).reduce((sum, t) => {
     let standardPrice = 20000;
     if (t.divisionType === 'GAS_INDUSTRI') {
@@ -1404,7 +1408,7 @@ const ReportsModule = ({ user, onNavigateHome }) => {
               {totalFocValuation > 0 && <span className="text-[9px] font-bold text-orange-200 bg-black/20 px-1.5 py-0.5 rounded">Valuasi FOC: Rp {(totalFocValuation||0).toLocaleString('id-ID')}</span>}
             </div>
           </div>
-          <div className="text-3xl font-black relative z-10">Rp {(totalOmset||0).toLocaleString('id-ID')}</div>
+          <div className="text-3xl font-black">Rp {(totalOmset||0).toLocaleString('id-ID')}</div>
         </div>
 
         <div className="pt-2">
