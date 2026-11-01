@@ -1595,8 +1595,10 @@ const AdminPanel = ({ onNavigateHome }) => {
 
   // Access Logs state & filters
   const [accessLogs, setAccessLogs] = useState([]);
-  const [accessLogFilter, setAccessLogFilter] = useState('TODAY');
+  const [accessLogFilter, setAccessLogFilter] = useState('TODAY'); // 'TODAY', 'WEEK', 'MONTH', 'CUSTOM'
   const [logFilterDate, setLogFilterDate] = useState(() => getMakassarDateString());
+  const [logFilterStart, setLogFilterStart] = useState(() => getMakassarDateString());
+  const [logFilterEnd, setLogFilterEnd] = useState(() => getMakassarDateString());
   const [logFilterUser, setLogFilterUser] = useState('ALL');
 
   useEffect(() => {
@@ -1611,15 +1613,21 @@ const AdminPanel = ({ onNavigateHome }) => {
     return () => unsubs.forEach(u => u && u());
   }, []);
 
-  // Fetch access logs when viewing access logs tab
+  // Fetch access logs on-demand when viewing access logs tab with optimized date-range queries
   useEffect(() => {
     if (activeCategory !== 'LOGS' || !canAccessAccessLogs) return;
-    const unsub = onSnapshot(getPublicPath('access_logs'), snap => {
+    
+    let logsQuery = getPublicPath('access_logs');
+    if (accessLogFilter === 'TODAY') {
+      logsQuery = query(getPublicPath('access_logs'), where('dateStr', '==', logFilterDate));
+    }
+
+    const unsub = onSnapshot(logsQuery, snap => {
       const l = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       setAccessLogs(l);
     }, e => console.warn(e));
     return () => unsub();
-  }, [activeCategory, canAccessAccessLogs]);
+  }, [activeCategory, canAccessAccessLogs, accessLogFilter, logFilterDate]);
 
   useEffect(() => {
     logSystemAccess(sessionUser, 'Membuka Panel Admin');
@@ -2030,27 +2038,56 @@ const AdminPanel = ({ onNavigateHome }) => {
 
       {activeCategory === 'LOGS' && canAccessAccessLogs && (
         <Card className="p-4 space-y-4 border-emerald-100">
-          <div className="flex justify-between items-center border-b border-emerald-50 pb-2">
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center border-b border-emerald-50 pb-3 gap-2">
             <h3 className="font-black text-sm text-emerald-900 flex items-center gap-1.5"><Key size={16} className="text-emerald-700"/> Log Akses & Audit Trail</h3>
-            <div className="flex bg-emerald-50 p-1 rounded-xl text-xs font-bold">
-              <button onClick={()=>setAccessLogFilter('TODAY')} className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${accessLogFilter==='TODAY'?'bg-emerald-600 text-white shadow-xs':'text-emerald-800'}`}>Hari Ini</button>
-              <button onClick={()=>setAccessLogFilter('ALL')} className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${accessLogFilter==='ALL'?'bg-emerald-600 text-white shadow-xs':'text-emerald-800'}`}>Semua</button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex bg-emerald-50 p-1 rounded-xl text-xs font-bold">
+                <button onClick={()=>setAccessLogFilter('TODAY')} className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${accessLogFilter==='TODAY'?'bg-emerald-600 text-white shadow-xs':'text-emerald-800'}`}>Hari Ini</button>
+                <button onClick={()=>setAccessLogFilter('ALL')} className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${accessLogFilter==='ALL'?'bg-emerald-600 text-white shadow-xs':'text-emerald-800'}`}>Semua</button>
+              </div>
+              {accessLogFilter === 'TODAY' && (
+                <input type="date" value={logFilterDate} onChange={e=>setLogFilterDate(e.target.value || getMakassarDateString())} className="p-1 bg-emerald-50 border border-emerald-200 rounded-lg text-xs font-bold text-emerald-900 outline-none" onWheel={(e)=>e.target.blur()} />
+              )}
+              <select value={logFilterUser} onChange={e=>setLogFilterUser(e.target.value)} className="p-1.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs font-bold text-emerald-900 outline-none cursor-pointer">
+                <option value="ALL">Semua Staf</option>
+                {allUsers.map(u => <option key={u.id} value={u.name || u.username}>{u.name || u.username}</option>)}
+              </select>
             </div>
           </div>
 
-          <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
-            {accessLogs.length === 0 ? (
-              <p className="text-xs text-emerald-600 text-center py-6 italic">Belum ada catatan log akses.</p>
+          {/* Activity Trend Bar Chart */}
+          <div className="bg-emerald-50/40 p-3 rounded-2xl border border-emerald-100 space-y-2">
+            <div className="flex justify-between items-center">
+              <span className="text-[10px] font-black uppercase text-emerald-800 flex items-center gap-1"><Activity size={13}/> Grafik Aktivitas Per Jam</span>
+              <span className="text-[9px] font-bold text-emerald-600">Total Log: {finalFilteredLogs.length}</span>
+            </div>
+            <div className="flex items-end justify-between h-24 pt-4 pb-1 px-1 bg-white rounded-xl border border-emerald-100 overflow-x-auto">
+              {hourlyActivityData.map(h => {
+                const hp = maxLogCount > 0 ? Math.max(Math.round((h.count / maxLogCount) * 100), 6) : 6;
+                return (
+                  <div key={h.hour} className="flex flex-col items-center gap-1 h-full justify-end flex-1 min-w-[20px] group cursor-default">
+                    <span className="text-[8px] font-bold text-emerald-700 opacity-0 group-hover:opacity-100 transition-all">{h.count}</span>
+                    <div className={`w-full max-w-[20px] rounded-t transition-all ${h.count > 0 ? 'bg-emerald-600 group-hover:bg-emerald-700 shadow-xs' : 'bg-slate-200'}`} style={{ height: `${hp}%` }}></div>
+                    <span className="text-[8px] font-bold text-slate-500">{h.hrNum % 3 === 0 ? h.hour.slice(0,2) : ''}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+            {finalFilteredLogs.length === 0 ? (
+              <p className="text-xs text-emerald-600 text-center py-6 italic">Tidak ada catatan log akses pada filter ini.</p>
             ) : (
-              accessLogs.slice().reverse().map((log, idx) => (
+              finalFilteredLogs.slice().reverse().map((log, idx) => (
                 <div key={log.id || idx} className="p-3 bg-emerald-50/50 border border-emerald-100 rounded-xl flex justify-between items-center text-xs gap-3">
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="font-black uppercase text-emerald-900">{log.userName || log.username || 'Staf'}</span>
-                      <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-bold">{log.role || 'USER'}</span>
+                      <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-bold">{log.userRole || log.role || 'USER'}</span>
                     </div>
-                    <p className="text-[11px] text-slate-700 font-bold mt-0.5">Aksi: {log.action || log.menu || 'Akses Menu'}</p>
-                    <p className="text-[9px] text-slate-400 mt-0.5">{log.dateStr || '-'} {log.timeStr || ''}</p>
+                    <p className="text-[11px] text-slate-700 font-bold mt-0.5">Aksi / Menu: {log.actionMenu || log.action || log.menu || 'Akses Menu'}</p>
+                    <p className="text-[9px] text-slate-400 mt-0.5">{log.dateStr || '-'} {getMakassarTimeString(log.timestamp)} WITA</p>
                   </div>
                 </div>
               ))
