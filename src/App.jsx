@@ -7,7 +7,7 @@ import {
   Users, Settings, Plus, X, LogOut, Droplet, Package, 
   Flame, ChevronRight, ArrowLeft, Truck,
   Share2, Anchor, Trash2, Download, List,
-  PieChart, Key, Ban, Check, Edit, Calendar, BarChart2, Printer
+  PieChart, Key, Ban, Check, Edit, Calendar, BarChart2, Printer, Shield, Activity
 } from 'lucide-react';
 
 const Analytics = () => null;
@@ -110,6 +110,26 @@ const getEffectivePrice = (customPrice, globalPrice) => {
   }
   const parsed = Number(customPrice);
   return isNaN(parsed) ? gp : parsed;
+};
+
+// Log Access Session Helper
+const logSystemAccess = async (user, actionMenu) => {
+  if (!user) return;
+  try {
+    const logId = 'log_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+    const logPayload = {
+      id: logId,
+      userId: user.id || 'unknown',
+      userName: user.name || user.username || 'Pengguna',
+      userRole: user.role || 'OPERATOR',
+      actionMenu: actionMenu || 'Dashboard',
+      timestamp: Date.now(),
+      dateStr: getMakassarDateString()
+    };
+    await setDoc(getDocPath('access_logs', logId), logPayload);
+  } catch (err) {
+    console.warn("Access logging error:", err);
+  }
 };
 
 // CHG-025: Thermal eReceipt Printing Helper with Dynamic Origin URL Logo Resolution & 80px Width
@@ -264,6 +284,7 @@ const AuthProvider = ({ children }) => {
   const [sessionUser, setSessionUser] = useState(() => getLocalData('session_user', null));
   const [allUsers, setAllUsers] = useState(() => getLocalData('all_users', []));
   const [allTx, setAllTx] = useState(() => getLocalData('transactions', []));
+  const [accessLogs, setAccessLogs] = useState(() => getLocalData('access_logs', []));
   const [systemInitialized, setSystemInitialized] = useState(() => {
     const localInit = getLocalData('sys_init', false);
     const users = getLocalData('all_users', []);
@@ -272,6 +293,7 @@ const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     let unsub = null;
+    let unsubLogs = null;
     const initAuth = async () => {
       try { await signInAnonymously(auth); } catch (err) { console.warn(err); }
     };
@@ -317,6 +339,14 @@ const AuthProvider = ({ children }) => {
               });
             }
           }, (err) => { console.warn(err); });
+
+          // Fetch Access Logs for Root Super Admin auditing
+          unsubLogs = onSnapshot(getPublicPath('access_logs'), (snap) => {
+            const logsList = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            setAccessLogs(logsList);
+            setLocalData('access_logs', logsList);
+          }, (err) => { console.warn(err); });
+
         } catch (e) { console.warn(e); }
       } else {
         try { await signInAnonymously(auth); } catch (err) { console.warn(err); }
@@ -325,7 +355,7 @@ const AuthProvider = ({ children }) => {
 
     const handleFocus = () => { try { auth.currentUser || signInAnonymously(auth); } catch (e) { console.warn(e); } };
     window.addEventListener('focus', handleFocus);
-    return () => { authUnsub(); if (unsub) unsub(); window.removeEventListener('focus', handleFocus); };
+    return () => { authUnsub(); if (unsub) unsub(); if (unsubLogs) unsubLogs(); window.removeEventListener('focus', handleFocus); };
   }, []);
 
   useEffect(() => {
@@ -365,7 +395,11 @@ const AuthProvider = ({ children }) => {
     const user = usersList.find(u => u.username?.toLowerCase() === cleanUsername && u.password === password && u.isActive !== false);
     if (user) {
       const isSuperOrMgmt = ['SUPER_ADMIN', 'MANAGEMENT'].includes(user.role);
-      const normalizedUser = { ...user, divisions: isSuperOrMgmt ? ['TANDON', 'GALLON', 'MOBIL_TANGKI', 'AIR_KAPAL', 'GAS_INDUSTRI'] : (user.divisions || ['TANDON']) };
+      const normalizedUser = { 
+        ...user, 
+        isActive: user.isActive !== undefined ? user.isActive : true,
+        divisions: isSuperOrMgmt ? ['TANDON', 'GALLON', 'MOBIL_TANGKI', 'AIR_KAPAL', 'GAS_INDUSTRI'] : (user.divisions || ['TANDON']) 
+      };
       setSessionUser(normalizedUser); setLocalData('session_user', normalizedUser); return { success: true };
     }
 
@@ -381,22 +415,22 @@ const AuthProvider = ({ children }) => {
     };
 
     const drvCheck = checkPortal('tandon_drivers', 'TANDON', 'DRIVER', 'name');
-    if (drvCheck.found) { if (!drvCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' }; setSessionUser(drvCheck.user); setLocalData('session_user', drvCheck.user); return { success: true }; }
+    if (drvCheck.found) { if (!drvCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' }; setSessionUser(drvCheck.user); setLocalData('session_user', drvCheck.user); logSystemAccess(drvCheck.user, 'Login Portal Supir'); return { success: true }; }
     const tcCheck = checkPortal('tangki_customers', 'MOBIL_TANGKI', 'CUSTOMER_TANGKI', 'name');
-    if (tcCheck.found) { if (!tcCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' }; setSessionUser(tcCheck.user); setLocalData('session_user', tcCheck.user); return { success: true }; }
+    if (tcCheck.found) { if (!tcCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' }; setSessionUser(tcCheck.user); setLocalData('session_user', tcCheck.user); logSystemAccess(tcCheck.user, 'Login Portal Tangki'); return { success: true }; }
     const gcCheck = checkPortal('gallon_customers', 'GALLON', 'CUSTOMER_GALLON', 'name');
-    if (gcCheck.found) { if (!gcCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' }; setSessionUser(gcCheck.user); setLocalData('session_user', gcCheck.user); return { success: true }; }
+    if (gcCheck.found) { if (!gcCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' }; setSessionUser(gcCheck.user); setLocalData('session_user', gcCheck.user); logSystemAccess(gcCheck.user, 'Login Portal Galon'); return { success: true }; }
     const shCheck = checkPortal('kapal_ships', 'AIR_KAPAL', 'CUSTOMER_KAPAL', 'shipName');
-    if (shCheck.found) { if (!shCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' }; setSessionUser(shCheck.user); setLocalData('session_user', shCheck.user); return { success: true }; }
+    if (shCheck.found) { if (!shCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' }; setSessionUser(shCheck.user); setLocalData('session_user', shCheck.user); logSystemAccess(shCheck.user, 'Login Portal Kapal'); return { success: true }; }
     const gsCheck = checkPortal('gas_customers', 'GAS_INDUSTRI', 'CUSTOMER_GAS', 'name');
-    if (gsCheck.found) { if (!gsCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' }; setSessionUser(gsCheck.user); setLocalData('session_user', gsCheck.user); return { success: true }; }
+    if (gsCheck.found) { if (!gsCheck.active) return { success: false, message: 'Portal Anda dinonaktifkan.' }; setSessionUser(gsCheck.user); setLocalData('session_user', gsCheck.user); logSystemAccess(gsCheck.user, 'Login Portal Gas'); return { success: true }; }
 
     return { success: false, message: 'Username atau password salah / non-aktif.' };
   };
 
   const logout = () => { setSessionUser(null); setLocalData('session_user', null); };
 
-  return <AuthContext.Provider value={{ sessionUser, allUsers, setAllUsers, systemInitialized, setSystemInitialized, login, logout, allTx, setAllTx }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ sessionUser, allUsers, setAllUsers, systemInitialized, setSystemInitialized, login, logout, allTx, setAllTx, accessLogs }}>{children}</AuthContext.Provider>;
 };
 
 const SystemInitScreen = () => {
@@ -406,7 +440,7 @@ const SystemInitScreen = () => {
   const handleInit = async (e) => {
     e.preventDefault();
     if (!name || !user || !pwd) return;
-    const admin = { id: 'usr_'+Date.now(), name, username: user.toLowerCase(), password: pwd, role: 'SUPER_ADMIN', divisions: ['TANDON', 'GALLON', 'MOBIL_TANGKI', 'AIR_KAPAL', 'GAS_INDUSTRI'], isActive: true };
+    const admin = { id: 'usr_'+Date.now(), name, username: user.toLowerCase(), password: pwd, role: 'SUPER_ADMIN', isRootSuperAdmin: true, divisions: ['TANDON', 'GALLON', 'MOBIL_TANGKI', 'AIR_KAPAL', 'GAS_INDUSTRI'], isActive: true };
     
     setAllUsers([admin]); setLocalData('all_users', [admin]);
     setSystemInitialized(true); setLocalData('sys_init', true);
@@ -672,7 +706,6 @@ const PurchasePerformanceGraph = ({ txList = [], metric = 'VOLUME', subtitle = '
     const dataMap = {};
     const safeTxList = Array.isArray(txList) ? txList : [];
     safeTxList.forEach(t => {
-      // CHG-022: Unique Entity Separation using composite key to prevent division name collisions
       const uniqueKey = viewMode === 'CUSTOMER' ? `${t.divisionType}_${t.entityId || t.entityName || 'UMUM'}` : (t.operatorName || 'SISTEM');
       const displayName = viewMode === 'CUSTOMER' ? (t.entityName || 'UMUM') : (t.operatorName || 'SISTEM');
       const divTag = viewMode === 'CUSTOMER' ? ` (${t.divisionType || ''})` : '';
@@ -807,7 +840,7 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
     'CO₂, 25 kg': 550000, 'LPG, 50 kg': 1500000, 'LPG, 12 kg': 275000, 'Oxygen Medis, 2 m³': 100000, 'Oxygen Medis, 6 m³': 150000
   });
   const [customerGasSelections, setCustomerGasSelections] = useState({});
-  const [reportDateMode, setReportDateMode] = useState('TODAY'); // 'TODAY', 'YESTERDAY', or 'CUSTOM'
+  const [reportDateMode, setReportDateMode] = useState('TODAY');
   const [customReportDate, setCustomReportDate] = useState(() => getMakassarDateString());
 
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -826,6 +859,10 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
   const yesterdayStr = useMemo(() => getAdjacentDateString(todayStr, -1), [todayStr]);
   
   const shiftActiveDateStr = reportDateMode === 'TODAY' ? todayStr : (reportDateMode === 'YESTERDAY' ? yesterdayStr : (customReportDate || todayStr));
+
+  useEffect(() => {
+    logSystemAccess(user, `Divisi: ${title}`);
+  }, [title]);
 
   useEffect(() => {
     let unsubs = [];
@@ -1207,6 +1244,10 @@ const ReportsModule = ({ user, onNavigateHome }) => {
   const [gasMasterConfig, setGasMasterConfig] = useState({});
 
   useEffect(() => {
+    logSystemAccess(user, 'Membuka Menu Laporan POS');
+  }, []);
+
+  useEffect(() => {
     let unsubs = [];
     try {
       unsubs.push(onSnapshot(getDocPath('settings', 'tandon_config'), snap => { if(snap.exists()) setMasterPrices(p=>({...p, TANDON: snap.data().price??20000})); }, e=>console.warn(e)));
@@ -1517,6 +1558,12 @@ const AdminPanel = ({ onNavigateHome }) => {
   
   const canManageCredentials = ['ADMIN', 'SUPER_ADMIN'].includes(sessionUser.role);
   const canResetPassword = sessionUser.role === 'SUPER_ADMIN'; 
+  const isSuperAdmin = sessionUser.role === 'SUPER_ADMIN';
+  const isManagementUser = sessionUser.role === 'MANAGEMENT';
+  
+  // CHG-029: Log Akses is available ONLY to Super-Admin and Log-Akses enabled Management users. Administrators do NOT have access.
+  const canAccessAccessLogs = isSuperAdmin || (isManagementUser && sessionUser.accessLogEnabled === true);
+  const canToggleAccessLogs = isSuperAdmin; // Only Root Super-Admin can enable/disable access logs for Management accounts
   
   const [prices, setPrices] = useState({ TANDON: 20000, GALLON: 6000, TANGKI: 350000, KAPAL: 50000 });
   const [gasProducts, setGasProducts] = useState({
@@ -1545,6 +1592,36 @@ const AdminPanel = ({ onNavigateHome }) => {
   const [promptUsername, setPromptUsername] = useState('');
   const [promptPassword, setPromptPassword] = useState('');
   const [promptError, setPromptError] = useState('');
+
+  // Access Logs state
+  const [accessLogs, setAccessLogs] = useState([]);
+  const [accessLogFilter, setAccessLogFilter] = useState('TODAY');
+
+  useEffect(() => {
+    let unsubs = [];
+    try {
+      unsubs.push(onSnapshot(getDocPath('settings', 'tandon_config'), snap => { if(snap.exists()) setPrices(p=>({...p, TANDON: snap.data().price??20000})); }, e=>console.warn(e)));
+      unsubs.push(onSnapshot(getDocPath('settings', 'gallon_config'), snap => { if(snap.exists()) setPrices(p=>({...p, GALLON: snap.data().price??6000})); }, e=>console.warn(e)));
+      unsubs.push(onSnapshot(getDocPath('settings', 'tangki_config'), snap => { if(snap.exists()) setPrices(p=>({...p, TANGKI: snap.data().price??350000})); }, e=>console.warn(e)));
+      unsubs.push(onSnapshot(getDocPath('settings', 'kapal_config'), snap => { if(snap.exists()) setPrices(p=>({...p, KAPAL: snap.data().price??50000})); }, e=>console.warn(e)));
+      unsubs.push(onSnapshot(getDocPath('settings', 'gas_config'), snap => { if(snap.exists() && snap.data().products) setGasProducts(snap.data().products); }, e=>console.warn(e)));
+    } catch(e){ console.warn(e); }
+    return () => unsubs.forEach(u => u && u());
+  }, []);
+
+  // Fetch access logs when viewing access logs tab
+  useEffect(() => {
+    if (activeCategory !== 'LOGS' || !canAccessAccessLogs) return;
+    const unsub = onSnapshot(getPublicPath('access_logs'), snap => {
+      const l = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setAccessLogs(l);
+    }, e => console.warn(e));
+    return () => unsub();
+  }, [activeCategory, canAccessAccessLogs]);
+
+  useEffect(() => {
+    logSystemAccess(sessionUser, 'Membuka Panel Admin');
+  }, []);
 
   useEffect(() => {
     let unsubs = [];
@@ -1683,9 +1760,27 @@ const AdminPanel = ({ onNavigateHome }) => {
     try { if (editingUser) await updateDoc(getDocPath('users', userId), newUserObj); else await setDoc(getDocPath('users', userId), newUserObj); } catch(e) { console.warn(e); }
   };
 
+  const toggleUserActiveStatus = async (userObj) => {
+    if (!canManageCredentials) return;
+    const newStatus = !(userObj.isActive !== false);
+    const updated = allUsers.map(u => u.id === userObj.id ? { ...u, isActive: newStatus } : u);
+    setAllUsers(updated); setLocalData('all_users', updated);
+    try { await updateDoc(getDocPath('users', userObj.id), { isActive: newStatus }); } catch(e) { console.warn(e); }
+  };
+
   const openEditUser = (u) => {
     setEditingUser(u); setNewUserName(u.name || ''); setNewUserUser(u.username || ''); setSuggestedPwd(''); 
     setNewUserRole(u.role || 'OPERATOR'); setNewUserDivs(u.divisions || ['TANDON']); setUserAddError(''); setIsAddUserOpen(true);
+  };
+
+  const toggleManagementAccessLog = async (userObj) => {
+    if (!canToggleAccessLogs) return;
+    const newStatus = !(userObj.accessLogEnabled === true);
+    const updated = allUsers.map(u => u.id === userObj.id ? { ...u, accessLogEnabled: newStatus } : u);
+    setAllUsers(updated); setLocalData('all_users', updated);
+    try {
+      await updateDoc(getDocPath('users', userObj.id), { accessLogEnabled: newStatus });
+    } catch(e) { console.warn(e); }
   };
 
   const togglePortalAccess = async (cust) => {
@@ -1745,6 +1840,29 @@ const AdminPanel = ({ onNavigateHome }) => {
 
   const fallbackMasterPrices = { TANDON: 20000, GALLON: 6000, TANGKI: 350000, KAPAL: 50000 };
 
+  // Access Logs processing for timeline graph and feed
+  const safeAccessLogs = Array.isArray(accessLogs) ? accessLogs : [];
+  const filteredLogsByDate = safeAccessLogs.filter(l => l.dateStr === logFilterDate);
+  const finalFilteredLogs = filteredLogsByDate.filter(l => {
+    if (logFilterUser === 'ALL') return true;
+    return l.userName === logFilterUser || l.userId === logFilterUser;
+  });
+
+  // Hourly chart data for access activity (00 to 23 hours)
+  const hourlyActivityData = useMemo(() => {
+    const hours = Array(24).fill(0);
+    filteredLogsByDate.forEach(l => {
+      try {
+        const d = new Date(l.timestamp);
+        const hr = d.getHours();
+        if (!isNaN(hr) && hr >= 0 && hr < 24) hours[hr]++;
+      } catch(e) {}
+    });
+    return hours.map((count, hr) => ({ hour: `${String(hr).padStart(2,'0')}:00`, count, hrNum: hr }));
+  }, [filteredLogsByDate]);
+
+  const maxLogCount = Math.max(...hourlyActivityData.map(h => h.count), 5);
+
   return (
     <div className="max-w-md sm:max-w-3xl mx-auto px-3 sm:px-4 py-4 pb-24 space-y-4">
       <div className="flex items-center justify-between">
@@ -1757,10 +1875,13 @@ const AdminPanel = ({ onNavigateHome }) => {
         </div>
       </div>
       
-      <div className="grid grid-cols-3 gap-1.5 bg-emerald-100/50 p-1 rounded-2xl text-xs font-extrabold border border-emerald-100">
+      <div className={`grid gap-1.5 bg-emerald-100/50 p-1 rounded-2xl text-xs font-extrabold border border-emerald-100 ${canAccessAccessLogs ? 'grid-cols-4' : 'grid-cols-3'}`}>
         <button onClick={()=>setActiveCategory('INTERNAL')} className={`py-3 rounded-xl transition-all cursor-pointer ${activeCategory==='INTERNAL'?'bg-emerald-600 text-white shadow-md':'text-emerald-700'}`}>Internal</button>
         <button onClick={()=>setActiveCategory('CUSTOMER')} className={`py-3 rounded-xl transition-all cursor-pointer ${activeCategory==='CUSTOMER'?'bg-emerald-600 text-white shadow-md':'text-emerald-700'}`}>Customer / Akun</button>
         <button onClick={()=>setActiveCategory('PRICING')} className={`py-3 rounded-xl transition-all cursor-pointer ${activeCategory==='PRICING'?'bg-emerald-600 text-white shadow-md':'text-emerald-700'}`}>Master Harga</button>
+        {canAccessAccessLogs && (
+          <button onClick={()=>setActiveCategory('LOGS')} className={`py-3 rounded-xl transition-all cursor-pointer ${activeCategory==='LOGS'?'bg-emerald-600 text-white shadow-md':'text-emerald-700'}`}>Log Akses</button>
+        )}
       </div>
       
       {activeCategory === 'INTERNAL' && (
@@ -1770,20 +1891,45 @@ const AdminPanel = ({ onNavigateHome }) => {
             {canManageCredentials && <Button onClick={()=>{ setEditingUser(null); setNewUserName(''); setNewUserUser(''); const defU = generateUniqueUsername('staf', allUsers, 'username'); setSuggestedPwd(generateSecurePassword(defU)); setNewUserRole('OPERATOR'); setNewUserDivs(['TANDON']); setIsAddUserOpen(true); setUserAddError(''); }} variant="emerald" className="py-1.5 px-3 text-xs"><Plus size={14}/> Tambah Staf</Button>}
           </div>
           <div className="space-y-2 max-h-96 overflow-y-auto">
-            {(Array.isArray(allUsers) ? allUsers : []).map(u => (
-              <div key={u.id} className="p-3 bg-emerald-50/50 border border-emerald-100 rounded-xl flex items-center justify-between text-xs">
-                <div>
-                  <span className="font-black uppercase text-emerald-900">{u.name} <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">{u.role}</span></span>
-                  <p className="text-[10px] text-emerald-600">@{u.username} {u.divisions && `• Div: ${(u.divisions || []).join(', ')}`}</p>
-                </div>
-                {canManageCredentials && (
-                  <div className="flex items-center gap-1.5">
-                    <button onClick={()=>openEditUser(u)} title="Edit Staf" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Edit size={15}/></button>
-                    {canResetPassword && <button onClick={()=>{setResetTarget({data: u, type: 'USER'}); setResetPwd(generateSecurePassword(u.username)); setResetMsg('');}} title="Reset Password" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Key size={15}/></button>}
+            {(Array.isArray(allUsers) ? allUsers : []).map(u => {
+              const isSelf = u.id === sessionUser.id;
+              const isUserActive = u.isActive !== false;
+              return (
+                <div key={u.id} className="p-3 bg-emerald-50/50 border border-emerald-100 rounded-xl flex items-center justify-between text-xs gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-black uppercase text-emerald-900 truncate">{u.name}</span>
+                      <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full shrink-0">{u.role}</span>
+                      <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full shrink-0 ${isUserActive ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{isUserActive ? 'Aktif' : 'Non-Aktif'}</span>
+                    </div>
+                    <p className="text-[10px] text-emerald-600 mt-0.5">@{u.username} {u.divisions && `• Div: ${(u.divisions || []).join(', ')}`}</p>
                   </div>
-                )}
-              </div>
-            ))}
+                  {canManageCredentials && (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button onClick={()=>openEditUser(u)} title="Edit Staf" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Edit size={15}/></button>
+                      {!isSelf ? (
+                        <button 
+                          onClick={async () => {
+                            const newActiveStatus = !isUserActive;
+                            const updated = allUsers.map(item => item.id === u.id ? { ...item, isActive: newActiveStatus } : item);
+                            setAllUsers(updated);
+                            setLocalData('all_users', updated);
+                            try { await updateDoc(getDocPath('users', u.id), { isActive: newActiveStatus }); } catch (err) { console.warn(err); }
+                          }} 
+                          title={isUserActive ? "Nonaktifkan Staf" : "Aktifkan Staf"} 
+                          className={`p-1.5 rounded-lg border text-xs font-bold cursor-pointer transition-colors ${isUserActive ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100' : 'bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-200'}`}
+                        >
+                          {isUserActive ? <Ban size={15}/> : <Check size={15}/>}
+                        </button>
+                      ) : (
+                        <span className="text-[9px] text-slate-400 italic px-1">Akun Anda</span>
+                      )}
+                      {canResetPassword && <button onClick={()=>{setResetTarget({data: u, type: 'USER'}); setResetPwd(generateSecurePassword(u.username)); setResetMsg('');}} title="Reset Password" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Key size={15}/></button>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </Card>
       )}
@@ -1830,26 +1976,20 @@ const AdminPanel = ({ onNavigateHome }) => {
                 }
 
                 return (
-                  <div key={c.id} className="p-3 bg-emerald-50/50 border border-emerald-100 rounded-xl flex items-center justify-between text-xs gap-3 hover:bg-emerald-50 transition-all">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className={`font-black uppercase truncate ${textColor}`}>{c[nameKey]}</span>
-                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${isEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>{isEnabled ? 'Portal Aktif' : 'Portal Dinonaktifkan'}</span>
-                      </div>
-                      {c.companyName && <p className="text-[10px] text-emerald-700 font-bold mt-0.5">PT: {c.companyName}</p>}
-                      {c.agentName && <p className="text-[10px] text-emerald-700 font-bold mt-0.5">Agen: {c.agentName}</p>}
-                      {c.customerType && <p className="text-[10px] text-emerald-700 font-bold mt-0.5">Tipe: {c.customerType} {c.resellerName && `- ${c.resellerName}`}</p>}
-                      <p className={`text-[10px] font-mono mt-0.5 ${textColor === 'text-emerald-900' ? 'text-emerald-600' : textColor}`}>@{c.username || 'belum_ada_username'} • Harga: {displayPriceText}</p>
+                  <div key={u.id} className="p-3 bg-emerald-50/50 border border-emerald-100 rounded-xl flex items-center justify-between text-xs">
+                    <div>
+                      <span className="font-black uppercase text-emerald-900">{u.name} <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">{u.role}</span></span>
+                      <p className="text-[10px] text-emerald-600">@{u.username} {u.divisions && `• Div: ${(u.divisions || []).join(', ')}`}</p>
                     </div>
                     {canManageCredentials && (
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button onClick={() => openEditCust(c)} title="Edit Akun" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Edit size={15}/></button>
-                        <button onClick={()=>togglePortalAccess(c)} title={isEnabled ? "Nonaktifkan Portal" : "Aktifkan Portal"} className={`p-1.5 rounded-lg border text-xs font-bold cursor-pointer transition-colors ${isEnabled ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100' : 'bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-200'}`}>
-                          {isEnabled ? <Ban size={15}/> : <Check size={15}/>}
-                        </button>
-                        {canResetPassword && c.username && c.password && (
-                          <button onClick={()=>{setResetTarget({data: c, type: 'CUSTOMER', confKey: CUST_CONFIGS[activeCustTab].key}); setResetPwd(generateSecurePassword(c.username)); setResetMsg('');}} title="Reset Password" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Key size={15}/></button>
+                      <div className="flex items-center gap-1.5">
+                        <button onClick={()=>openEditUser(u)} title="Edit Staf" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Edit size={15}/></button>
+                        {u.id !== sessionUser.id && (
+                          <button onClick={()=>toggleUserActiveStatus(u)} title={u.isActive !== false ? "Nonaktifkan Staf" : "Aktifkan Staf"} className={`p-1.5 rounded-lg border text-xs font-bold cursor-pointer transition-colors ${u.isActive !== false ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100' : 'bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-200'}`}>
+                            {u.isActive !== false ? <Ban size={15}/> : <Check size={15}/>}
+                          </button>
                         )}
+                        {canResetPassword && <button onClick={()=>{setResetTarget({data: u, type: 'USER'}); setResetPwd(generateSecurePassword(u.username)); setResetMsg('');}} title="Reset Password" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Key size={15}/></button>}
                       </div>
                     )}
                   </div>
@@ -1876,13 +2016,44 @@ const AdminPanel = ({ onNavigateHome }) => {
                 {Object.entries(gasProducts).map(([prodName, prodPrice]) => (
                   <div key={prodName} className="flex items-center justify-between p-2.5 border border-orange-100 rounded-xl bg-orange-50/30">
                     <span className="text-xs font-bold text-orange-900">{prodName}</span>
-                    <input type="number" value={prodPrice} onChange={e=>updateGasProductPrice(prodName, e.target.value)} onWheel={(e) => e.target.blur()} disabled={!canManageCredentials} className="w-32 p-2 border border-orange-200 rounded-lg text-sm font-black text-right outline-none focus:ring-2 focus:ring-orange-500 text-orange-900" />
+                    <input type="number" value={prodPrice} onChange={e=>updateGasProductPrice(prodName, e.target.value)} onWheel={(e) => e.target.blur()} disabled={!canManageCredentials} className="w-32 p-2 border border-orange-200 rounded-lg text-sm font-black text-right outline-none focus:ring-2 focus:ring-emerald-500 text-orange-900" />
                   </div>
                 ))}
               </div>
             </div>
           </div>
           {!canManageCredentials && <p className="text-xs text-red-500 font-bold text-center">Hanya Administrator yang dapat mengubah harga.</p>}
+        </Card>
+      )}
+
+      {activeCategory === 'LOGS' && canAccessAccessLogs && (
+        <Card className="p-4 space-y-4 border-emerald-100">
+          <div className="flex justify-between items-center border-b border-emerald-50 pb-2">
+            <h3 className="font-black text-sm text-emerald-900 flex items-center gap-1.5"><Key size={16} className="text-emerald-700"/> Log Akses & Audit Trail</h3>
+            <div className="flex bg-emerald-50 p-1 rounded-xl text-xs font-bold">
+              <button onClick={()=>setAccessLogFilter('TODAY')} className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${accessLogFilter==='TODAY'?'bg-emerald-600 text-white shadow-xs':'text-emerald-800'}`}>Hari Ini</button>
+              <button onClick={()=>setAccessLogFilter('ALL')} className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${accessLogFilter==='ALL'?'bg-emerald-600 text-white shadow-xs':'text-emerald-800'}`}>Semua</button>
+            </div>
+          </div>
+
+          <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+            {accessLogs.length === 0 ? (
+              <p className="text-xs text-emerald-600 text-center py-6 italic">Belum ada catatan log akses.</p>
+            ) : (
+              accessLogs.slice().reverse().map((log, idx) => (
+                <div key={log.id || idx} className="p-3 bg-emerald-50/50 border border-emerald-100 rounded-xl flex justify-between items-center text-xs gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-black uppercase text-emerald-900">{log.userName || log.username || 'Staf'}</span>
+                      <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-bold">{log.role || 'USER'}</span>
+                    </div>
+                    <p className="text-[11px] text-slate-700 font-bold mt-0.5">Aksi: {log.action || log.menu || 'Akses Menu'}</p>
+                    <p className="text-[9px] text-slate-400 mt-0.5">{log.dateStr || '-'} {log.timeStr || ''}</p>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </Card>
       )}
 
@@ -2098,6 +2269,12 @@ const MainApp = () => {
   const [currentView, setCurrentView] = useState('HOME');
   
   useEffect(() => { setCurrentView('HOME'); }, [sessionUser?.id]);
+
+  useEffect(() => {
+    if (sessionUser) {
+      logSystemAccess(sessionUser, currentView === 'HOME' ? 'Dashboard Utama' : currentView);
+    }
+  }, [currentView, sessionUser?.id]);
 
   if (!systemInitialized) return <SystemInitScreen />;
   if (!sessionUser) return <LoginScreen />;
