@@ -1593,9 +1593,11 @@ const AdminPanel = ({ onNavigateHome }) => {
   const [promptPassword, setPromptPassword] = useState('');
   const [promptError, setPromptError] = useState('');
 
-  // Access Logs state
+  // Access Logs state & filters
   const [accessLogs, setAccessLogs] = useState([]);
   const [accessLogFilter, setAccessLogFilter] = useState('TODAY');
+  const [logFilterDate, setLogFilterDate] = useState(() => getMakassarDateString());
+  const [logFilterUser, setLogFilterUser] = useState('ALL');
 
   useEffect(() => {
     let unsubs = [];
