@@ -1986,20 +1986,21 @@ const AdminPanel = ({ onNavigateHome }) => {
                 }
 
                 return (
-                  <div key={u.id} className="p-3 bg-emerald-50/50 border border-emerald-100 rounded-xl flex items-center justify-between text-xs">
-                    <div>
-                      <span className="font-black uppercase text-emerald-900">{u.name} <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">{u.role}</span></span>
-                      <p className="text-[10px] text-emerald-600">@{u.username} {u.divisions && `• Div: ${(u.divisions || []).join(', ')}`}</p>
+                  <div key={c.id} className="p-3 bg-emerald-50/50 border border-emerald-100 rounded-xl flex items-center justify-between text-xs gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className={`font-black uppercase truncate ${textColor}`}>{c[nameKey] || c.name || c.shipName}</span>
+                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full shrink-0 ${isEnabled ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}>{isEnabled ? 'Portal Aktif' : 'Portal Non-Aktif'}</span>
+                      </div>
+                      <p className="text-[10px] text-emerald-600 mt-0.5">@{c.username || 'belum_ada_username'} {c.companyName && `• PT: ${c.companyName}`} {c.agentName && `• Agen: ${c.agentName}`} • Harga: {displayPriceText}</p>
                     </div>
                     {canManageCredentials && (
-                      <div className="flex items-center gap-1.5">
-                        <button onClick={()=>openEditUser(u)} title="Edit Staf" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Edit size={15}/></button>
-                        {u.id !== sessionUser.id && (
-                          <button onClick={()=>toggleUserActiveStatus(u)} title={u.isActive !== false ? "Nonaktifkan Staf" : "Aktifkan Staf"} className={`p-1.5 rounded-lg border text-xs font-bold cursor-pointer transition-colors ${u.isActive !== false ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100' : 'bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-200'}`}>
-                            {u.isActive !== false ? <Ban size={15}/> : <Check size={15}/>}
-                          </button>
-                        )}
-                        {canResetPassword && <button onClick={()=>{setResetTarget({data: u, type: 'USER'}); setResetPwd(generateSecurePassword(u.username)); setResetMsg('');}} title="Reset Password" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Key size={15}/></button>}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button onClick={()=>openEditCust(c)} title="Edit Akun" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Edit size={15}/></button>
+                        <button onClick={()=>togglePortalAccess(c)} title={isEnabled ? "Nonaktifkan Portal" : "Aktifkan Portal"} className={`p-1.5 rounded-lg border text-xs font-bold cursor-pointer transition-colors ${isEnabled ? 'bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-100' : 'bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-200'}`}>
+                          {isEnabled ? <Ban size={15}/> : <Check size={15}/>}
+                        </button>
+                        {canResetPassword && <button onClick={()=>{setResetTarget({data: c, type: 'CUSTOMER', confKey: CUST_CONFIGS[activeCustTab].key}); setResetPwd(generateSecurePassword(c.username || 'user')); setResetMsg('');}} title="Reset Password" className="p-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg cursor-pointer"><Key size={15}/></button>}
                       </div>
                     )}
                   </div>
