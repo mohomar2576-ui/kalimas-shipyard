@@ -1007,7 +1007,8 @@ const SharedOperatorTemplate = ({ user, title, icon, unitLabel, dbKeys, priceLab
           </div>
         );
       } else {
-        const qtys = dbKeys.divType === 'AIR_KAPAL' ? [10, 20, 50] : dbKeys.divType === 'GALLON' ? [1, 5, 10, 20] : [1];
+        // CHG-038: Removed 5 and 20 from GALLON to save horizontal space for customer names
+        const qtys = dbKeys.divType === 'AIR_KAPAL' ? [10, 20, 50] : dbKeys.divType === 'GALLON' ? [1, 10] : [1];
         const showCustom = dbKeys.divType === 'GALLON' || dbKeys.divType === 'AIR_KAPAL';
         btns = (
           <div className="flex items-center gap-1">
@@ -2308,6 +2309,9 @@ const MainApp = () => {
   const { sessionUser, logout, systemInitialized } = useContext(AuthContext);
   const [currentView, setCurrentView] = useState('HOME');
   
+  // CHG-038: Network Sync Status tracking
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+
   useEffect(() => { setCurrentView('HOME'); }, [sessionUser?.id]);
 
   useEffect(() => {
@@ -2315,6 +2319,19 @@ const MainApp = () => {
       logSystemAccess(sessionUser, currentView === 'HOME' ? 'Dashboard Utama' : currentView);
     }
   }, [currentView, sessionUser?.id]);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   if (!systemInitialized) return <SystemInitScreen />;
   if (!sessionUser) return <LoginScreen />;
@@ -2332,6 +2349,11 @@ const MainApp = () => {
             <span className="text-[10px] font-black uppercase text-slate-900 leading-tight">{sessionUser.name}</span>
             <span className="text-[8px] font-bold px-1.5 py-0.5 rounded text-emerald-800 bg-emerald-100 leading-none mt-0.5">{sessionUser.role}</span>
           </div>
+          
+          <div className={`px-2 py-1 rounded-lg shadow-sm text-[10px] font-bold flex items-center justify-center border transition-colors ${isOnline ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'}`} title={isOnline ? 'Sinkron (Online)' : 'Tertunda (Offline)'}>
+            {isOnline ? '✅' : '❌'}
+          </div>
+
           <button onClick={logout} className="p-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl shadow-xs cursor-pointer transition-colors"><LogOut size={16} /></button>
         </div>
       </header>
@@ -2347,18 +2369,13 @@ const MainApp = () => {
       </main>
     </div>
   );
-};
+}
 
 export default function App() {
-  useEffect(() => {
-    isSupported().then(yes => yes && getAnalytics(app)).catch(() => {});
-  }, []);
-
   return (
     <ErrorBoundary>
       <AuthProvider>
         <MainApp />
-        <Analytics />
       </AuthProvider>
     </ErrorBoundary>
   );
