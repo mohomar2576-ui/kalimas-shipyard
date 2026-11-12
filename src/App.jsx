@@ -1,7 +1,12 @@
+// ============================================================================
+// GALANGAN KALIMAS POINT-OF-SALES (POS)
+// OFFICIAL VERSION 1 (STABLE RELEASE)
+// ============================================================================
+
 import React, { useState, useEffect, createContext, useContext, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, onSnapshot, collection, updateDoc, query, where } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, onSnapshot, collection, updateDoc, query, where, enableMultiTabIndexedDbPersistence } from 'firebase/firestore';
 import { getAnalytics, isSupported } from 'firebase/analytics';
 import { 
   Users, Settings, Plus, X, LogOut, Droplet, Package, 
@@ -25,6 +30,20 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+
+// Aktifkan Offline Persistence (IndexedDB) v2.0.1
+try {
+  enableMultiTabIndexedDbPersistence(db).catch((err) => {
+    if (err.code === 'failed-precondition') {
+      console.warn('Multiple tabs open, offline persistence is limited.');
+    } else if (err.code === 'unimplemented') {
+      console.warn('Current browser does not support offline persistence.');
+    }
+  });
+} catch (e) {
+  console.warn("Offline persistence init error:", e);
+}
+
 const appId = typeof window !== 'undefined' && window.__app_id ? window.__app_id : 'default-kalimas-app';
 
 const getPublicPath = (collectionName) => collection(db, 'artifacts', appId, 'public', 'data', collectionName);
@@ -2343,7 +2362,10 @@ const MainApp = () => {
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 font-sans">
       <header className="bg-white border-b border-slate-200 sticky top-0 z-40 px-3 sm:px-4 py-2.5 flex justify-between items-center shadow-xs">
-        <GalanganKalimasLogo size="sm" />
+        <div className="flex items-center gap-2">
+          <GalanganKalimasLogo size="sm" />
+          <span className="text-[8px] font-black bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-full border border-emerald-200 shadow-sm mt-1 mb-[-4px]">v2.0.1</span>
+        </div>
         <div className="flex items-center gap-2.5 sm:gap-3">
           <div className="text-right flex flex-col items-end justify-center">
             <span className="text-[10px] font-black uppercase text-slate-900 leading-tight">{sessionUser.name}</span>
